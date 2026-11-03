@@ -1,0 +1,47 @@
+# Saídas extras de rede para o worker (ADR-08.3). Cada uma expõe um SOCKS5 só em 127.0.0.1.
+#
+#   docker compose --env-file ~/.config/yt-music-curator/saidas.env up -d --build                 # VPN
+#   docker compose --env-file ~/.config/yt-music-curator/saidas.env --profile celular up -d       # + celular
+#
+# saidas.env (fora do git, permissão 600):
+#   VPN_DIR=/caminho/da/pasta/da/vpn          # com o .ovpn e o arquivo de usuário/senha que ele referencia
+#   OVPN=config.ovpn
+#   TS_AUTHKEY=tskey-auth-...                   # login.tailscale.com/admin/settings/keys
+#   CELULAR_IP=100.x.y.z                        # o celular com "Run as exit node" ligado, nos dados móveis
+#
+# No config.toml do curator:
+#   [[proxy]]  nome = "vpn"      url = "socks5://127.0.0.1:1081"
+#   [[proxy]]  nome = "celular"  url = "socks5://127.0.0.1:1082"
+name: curator-saidas
+
+services:
+  vpn:
+    build: ./vpn
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      OVPN: ${OVPN:?defina OVPN no saidas.env}
+    volumes:
+      - ${VPN_DIR:?defina VPN_DIR no saidas.env}:/vpn:ro
+    # o DNS embutido do Docker não funciona com todo o tráfego indo para o túnel: usa os que a VPN empurra
+    dns: [1.1.1.1, 8.8.8.8]
+    ports: ["127.0.0.1:1081:1080"]
+    restart: unless-stopped
+
+  celular:
+    profiles: [celular]
+    image: tailscale/tailscale:stable@sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c
+    hostname: curator-saida-celular
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}      # obrigatória para o profile celular
+      TS_HOSTNAME: curator-saida-celular
+      TS_USERSPACE: "true"          # sem tun: não mexe na rede do host nem do container
+      TS_SOCKS5_SERVER: ":1055"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_EXTRA_ARGS: "--exit-node=${CELULAR_IP:-} --exit-node-allow-lan-access=false"
+    volumes: [tailscale-estado:/var/lib/tailscale]
+    ports: ["127.0.0.1:1082:1055"]
+    restart: unless-stopped
+
+volumes:
+  tailscale-estado:

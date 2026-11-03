@@ -70,6 +70,14 @@ caminho = "~/Música"   # depois: uv run curator pasta-local
 
 Para rodar todo dia em segundo plano, veja `contrib/systemd/`.
 
+**Várias saídas em paralelo.** Cada `[[proxy]]` do config vira uma linha de download própria, com a sua cota e o seu ritmo; a análise continua uma faixa por vez. `contrib/saidas/compose.yml` traz duas saídas prontas: uma VPN OpenVPN e um celular via Tailscale (exit node, nos dados móveis), cada uma como SOCKS5 em `127.0.0.1`:
+
+```sh
+cd contrib/saidas
+docker compose --env-file ~/.config/yt-music-curator/saidas.env up -d --build                  # VPN
+docker compose --env-file ~/.config/yt-music-curator/saidas.env --profile celular up -d        # + celular
+```
+
 ### Receitas, classificação e planos
 
 Uma **receita** descreve uma playlist em JSON (o que o Claude vai escrever via MCP); o motor escolhe as músicas de forma determinística: mesma receita + mesmo banco = mesma lista.

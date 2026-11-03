@@ -72,6 +72,20 @@ def proximo(con: sqlite3.Connection, agora: datetime, max_tentativas: int) -> sq
     ).fetchone()
 
 
+def reservar(con: sqlite3.Connection, agora: datetime, max_tentativas: int) -> sqlite3.Row | None:
+    """Como `proximo`, mas já marca o item como "baixando" no mesmo comando: dois workers em paralelo
+    nunca pegam a mesma faixa (um UPDATE é atômico no SQLite)."""
+    return con.execute(
+        """UPDATE fila_download SET status = 'baixando', atualizada_em = :m WHERE video_id = (
+             SELECT q.video_id FROM fila_download q JOIN faixas f USING (video_id)
+             WHERE q.status IN ('pendente', 'erro') AND q.tentativas < :max
+               AND (q.proxima_tentativa_em IS NULL OR q.proxima_tentativa_em <= :agora)
+             ORDER BY f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1)
+           RETURNING *""",
+        {"m": agora_iso(), "max": max_tentativas, "agora": _iso(agora)},
+    ).fetchone()
+
+
 def marcar(con: sqlite3.Connection, video_id: str, status: str, **campos) -> None:
     if "provedores_tentados" in campos:
         campos["provedores_tentados"] = json.dumps(campos["provedores_tentados"])

@@ -157,3 +157,115 @@ def test_cota_diaria_respeitada(con, cfg):
     rel = w.rodar()
     assert rel.contagem == {"ok": 3}
     assert rel.motivo_parada == "todas as saídas em quarentena ou sem cota"
+
+
+# ------------------------------------------------------------------ modo paralelo (uma thread por saída)
+
+
+def test_reservar_nunca_entrega_a_mesma_faixa_a_dois_workers(con):
+    from curator.banco.conexao import abrir
+
+    outra = abrir(caminhos().banco)
+    a = fila.reservar(con, T0, 6)
+    b = fila.reservar(outra, T0, 6)
+    assert a["video_id"] != b["video_id"]
+    assert {
+        r[0]
+        for r in con.execute(
+            "SELECT status FROM fila_download WHERE video_id IN (?, ?)", (a["video_id"], b["video_id"])
+        )
+    } == {"baixando"}
+
+
+class AnalisadorConcorrencia(AnalisadorFalso):
+    """Falha o teste se duas análises rodarem ao mesmo tempo."""
+
+    def __init__(self):
+        super().__init__()
+        import threading
+
+        self.ativos, self.maximo, self._t = 0, 0, threading.Lock()
+
+    def analisar(self, caminho):
+        import time
+
+        with self._t:
+            self.ativos += 1
+            self.maximo = max(self.maximo, self.ativos)
+        time.sleep(0.02)
+        try:
+            return super().analisar(caminho)
+        finally:
+            with self._t:
+                self.ativos -= 1
+
+
+def test_paralelo_usa_todas_as_saidas_sem_repetir_e_analisa_uma_por_vez(con, cfg):
+    from curator.audio.worker import rodar_em_paralelo
+
+    cfg["proxy"] = [
+        {"nome": "vpn", "url": "socks5://127.0.0.1:1081"},
+        {"nome": "celular", "url": "socks5://127.0.0.1:1082"},
+    ]
+    provs = []
+
+    def montar(cfg, c):
+        p = ProvedorFalso("youtube_music", [])
+        provs.append(p)
+        return {"youtube_music": p}
+
+    an = AnalisadorConcorrencia()
+    rel = rodar_em_paralelo(caminhos().banco, cfg, an, montar, dormir=lambda s: None)
+    assert rel.contagem == {"ok": 7} and rel.motivo_parada == "fila vazia"
+    assert an.maximo == 1  # análise serializada
+    usadas = [s for p in provs for s in p.saidas_usadas]
+    assert sorted(set(usadas)) == ["celular", "direta", "vpn"]
+    assert len(usadas) == 7  # nenhuma faixa foi buscada duas vezes
+    assert con.execute("SELECT count(*) FROM fila_download WHERE status = 'ok'").fetchone()[0] == 7
+
+
+def test_paralelo_respeita_limite_global_e_cota_por_saida(con, cfg):
+    from curator.audio.worker import rodar_em_paralelo
+
+    cfg["fila"]["cota_diaria"] = 2  # direta e vpn: 2 cada
+    cfg["proxy"] = [{"nome": "vpn", "url": "socks5://127.0.0.1:1081"}]
+    rel = rodar_em_paralelo(
+        caminhos().banco,
+        cfg,
+        AnalisadorFalso(),
+        lambda c, k: {"youtube_music": ProvedorFalso("youtube_music", [])},
+        dormir=lambda s: None,
+    )
+    assert rel.contagem == {"ok": 4} and rel.motivo_parada == "todas as saídas em quarentena ou sem cota"
+    usos = dict(con.execute("SELECT nome, uso_hoje FROM proxies").fetchall())
+    assert usos == {"direta": 2, "vpn": 2}
+
+    cfg["fila"]["cota_diaria"] = 100
+    rel = rodar_em_paralelo(caminhos().banco, cfg, AnalisadorFalso(), lambda c, k: {"youtube_music": ProvedorFalso("youtube_music", [])},
+                            limite=2, dormir=lambda s: None)  # fmt: skip
+    assert rel.contagem == {"ok": 2} and rel.motivo_parada.startswith("limite")
+
+
+def test_paralelo_bloqueio_numa_saida_nao_para_as_outras(con, cfg):
+    from curator.audio.worker import rodar_em_paralelo
+
+    cfg["proxy"] = [{"nome": "vpn", "url": "socks5://127.0.0.1:1081"}]
+
+    class SoDiretaBloqueada(ProvedorFalso):
+        def buscar(self, faixa, saida):
+            if saida.nome == "direta":
+                self.saidas_usadas.append("direta")
+                from curator.audio.provedores.base import ErroBloqueio
+
+                raise ErroBloqueio("Sign in to confirm you're not a bot")
+            import time
+
+            time.sleep(0.03)  # a vpn demora um pouco: as duas threads disputam a fila de verdade
+            return super().buscar(faixa, saida)
+
+    rel = rodar_em_paralelo(caminhos().banco, cfg, AnalisadorFalso(), lambda c, k: {"youtube_music": SoDiretaBloqueada("youtube_music", [])},
+                            dormir=lambda s: None)  # fmt: skip
+    assert rel.contagem["ok"] == 7  # a vpn processou tudo
+    assert (
+        con.execute("SELECT quarentena_ate IS NOT NULL FROM proxies WHERE nome = 'direta'").fetchone()[0] == 1
+    )
