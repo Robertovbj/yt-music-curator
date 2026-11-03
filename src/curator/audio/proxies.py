@@ -17,6 +17,11 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _hoje(agora: datetime) -> str:
+    """Dia da cota no fuso LOCAL: em UTC o dia viraria às 21h (-03) e daria duas cotas no mesmo dia."""
+    return agora.astimezone().date().isoformat()
+
+
 def mascarar(url: str | None) -> str:
     """socks5://usuario:senha@host:1080 → socks5://***@host:1080 (nunca logar credenciais)."""
     return re.sub(r"//[^/@]+@", "//***@", url) if url else "(direta)"
@@ -50,13 +55,13 @@ def escolher(con: sqlite3.Connection, agora: datetime) -> Saida | None:
         f"""SELECT nome, url FROM proxies
             WHERE ativo = 1 AND (quarentena_ate IS NULL OR quarentena_ate <= :agora) AND {_USO} < cota_diaria
             ORDER BY {_USO}, coalesce(ultimo_uso_em, ''), nome LIMIT 1""",
-        {"agora": _iso(agora), "hoje": agora.astimezone(UTC).date().isoformat()},
+        {"agora": _iso(agora), "hoje": _hoje(agora)},
     ).fetchone()
     return Saida(linha["nome"], linha["url"]) if linha else None
 
 
 def registrar_uso(con: sqlite3.Connection, nome: str, agora: datetime) -> None:
-    hoje = agora.astimezone(UTC).date().isoformat()
+    hoje = _hoje(agora)
     con.execute(
         f"UPDATE proxies SET uso_hoje = {_USO} + 1, dia_uso = :hoje, ultimo_uso_em = :agora WHERE nome = :nome",
         {"hoje": hoje, "agora": _iso(agora), "nome": nome},
@@ -93,7 +98,7 @@ def quarentenar(con: sqlite3.Connection, nome: str, cfg: dict, agora: datetime) 
 
 
 def estado(con: sqlite3.Connection, agora: datetime) -> list[dict]:
-    hoje = agora.astimezone(UTC).date().isoformat()
+    hoje = _hoje(agora)
     return [
         {**dict(r), "url": mascarar(r["url"]), "uso_hoje": r["uso_efetivo"]}
         for r in con.execute(
@@ -111,5 +116,6 @@ def proxima_liberacao(con: sqlite3.Connection, agora: datetime) -> datetime | No
             "SELECT quarentena_ate FROM proxies WHERE ativo = 1 AND quarentena_ate > ?", (_iso(agora),)
         )
     ]
-    amanha = datetime.combine(agora.astimezone(UTC).date() + timedelta(days=1), datetime.min.time(), UTC)
+    local = agora.astimezone()
+    amanha = datetime.combine(local.date() + timedelta(days=1), datetime.min.time(), local.tzinfo)
     return min([*fins, amanha])

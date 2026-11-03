@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 
 from curator.audio import casamento
-from curator.audio.provedores.base import Candidato, ErroTransitorio, FaixaAlvo, Saida
+from curator.audio.provedores.base import Candidato, ErroIndisponivel, ErroTransitorio, FaixaAlvo, Saida
 from curator.audio.provedores.ytdlp import BaseYtDlp
 
 _ITEM = re.compile(r'<li class="searchresult[^"]*"(.*?)</li>', re.DOTALL)
@@ -51,6 +51,9 @@ class Bandcamp(BaseYtDlp):
                 pagina = r.read().decode("utf-8", "replace")
         except Exception as e:
             raise ErroTransitorio(f"busca no Bandcamp falhou: {e}") from e
+        if "<title>Client Challenge</title>" in pagina:
+            # Desafio anti-robô em JavaScript (visto em 2026-11-03): não contornamos. Sem resultados possíveis.
+            raise ErroIndisponivel("o Bandcamp exige um desafio JavaScript na busca; provedor indisponível")
         candidatos = [
             Candidato(self.nome, u, t, a, None, casamento.score(faixa, t, a, None, self.tolerancia_s))
             for u, t, a in ler_resultados(pagina)[:5]
