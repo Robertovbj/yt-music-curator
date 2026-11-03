@@ -52,7 +52,11 @@ def analisar(
         falhar(str(e))
     worker = Worker(con, cfg, analisador, provedores.montar(cfg, con))
     worker.instalar_sinais()
-    rel = worker.rodar(limite=limite, ate=_horario(ate) if ate else None)
+    rel = worker.rodar(
+        limite=limite,
+        ate=_horario(ate) if ate else None,
+        ao_processar=lambda p: typer.echo(p.linha(), err=True),
+    )
 
     partes = (
         ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in sorted(rel.contagem.items())) or "nada processado"

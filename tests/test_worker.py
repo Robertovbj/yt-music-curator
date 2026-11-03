@@ -64,6 +64,16 @@ def test_fluxo_feliz_grava_e_apaga_audio(con, cfg):
     assert con.execute("SELECT uso_hoje, sucessos FROM proxies WHERE nome = 'direta'").fetchone()[:] == (2, 2)
 
 
+def test_progresso_uma_linha_por_faixa(con, cfg):
+    yt = ProvedorFalso("youtube_music", ["ok", "indisponivel"])
+    w, _ = worker(con, cfg, [yt])
+    linhas = []
+    w.rodar(limite=2, ao_processar=lambda p: linhas.append(p.linha()))
+    assert len(linhas) == 2
+    assert linhas[0].startswith("[1/2] Música a — Banda · ok em ")
+    assert linhas[1].startswith("[2/2] Música b — Banda · sem audio em ")
+
+
 def test_bloqueio_quarentena_a_saida_e_nao_gasta_tentativa(con, cfg):
     cfg["proxy"] = [{"nome": "vps", "url": "socks5://10.0.0.1:1080"}]
     yt = ProvedorFalso("youtube_music", ["bloqueio", "ok"])

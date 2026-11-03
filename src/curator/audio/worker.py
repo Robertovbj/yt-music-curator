@@ -42,6 +42,23 @@ class Relatorio:
     segundos_por_faixa: list[float] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Progresso:
+    """Uma faixa processada. `n` conta as faixas que valem para o limite (bloqueios não contam)."""
+
+    n: int
+    limite: int | None
+    titulo: str
+    artistas: list[str]
+    resultado: str  # ok | sem_audio | erro | bloqueio
+    segundos: float
+
+    def linha(self) -> str:
+        total = self.limite if self.limite is not None else "∞"
+        quem = f"{self.titulo} — {', '.join(self.artistas[:2])}" if self.artistas else self.titulo
+        return f"[{self.n}/{total}] {quem} · {self.resultado.replace('_', ' ')} em {self.segundos:.0f} s"
+
+
 def carregar_faixa(con, video_id: str) -> FaixaAlvo:
     r = con.execute(
         "SELECT video_id, titulo, artistas, duracao_s, album_nome FROM faixas WHERE video_id = ?", (video_id,)
@@ -81,7 +98,13 @@ class Worker:
         signal.signal(signal.SIGTERM, pedir_parada)
         signal.signal(signal.SIGINT, pedir_parada)
 
-    def rodar(self, limite: int | None = None, ate: datetime | None = None) -> Relatorio:
+    def rodar(
+        self,
+        limite: int | None = None,
+        ate: datetime | None = None,
+        ao_processar: Callable[[Progresso], None] | None = None,
+    ) -> Relatorio:
+        """`ao_processar` recebe um `Progresso` depois de cada faixa (a CLI imprime uma linha por faixa)."""
         rel = Relatorio()
         proxies.sincronizar_config(self.con, self.cfg)
         if n := fila.recuperar(self.con):
@@ -109,8 +132,12 @@ class Worker:
             rel.contagem[resultado] += 1
             if resultado != "bloqueio":
                 processadas += 1
+            segundos = time.perf_counter() - inicio
             if resultado == "ok":
-                rel.segundos_por_faixa.append(time.perf_counter() - inicio)
+                rel.segundos_por_faixa.append(segundos)
+            if ao_processar:
+                f = carregar_faixa(self.con, item["video_id"])
+                ao_processar(Progresso(processadas, limite, f.titulo, f.artistas, resultado, segundos))
             if usou_rede and not self.parar and (limite is None or processadas < limite):
                 f = self.cfg["fila"]
                 self.dormir(self.rng.uniform(f["intervalo_min_s"], f["intervalo_max_s"]))
