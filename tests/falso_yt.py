@@ -1,0 +1,89 @@
+"""YTMusic falso, com o formato de resposta do ytmusicapi 1.12, para testar a coleta sem rede."""
+
+from collections import Counter
+
+
+def faixa(vid, titulo=None, artistas=("Banda",), album=None, dur=200, set_id=None):
+    return {
+        "videoId": vid,
+        "title": titulo or f"Música {vid}",
+        "artists": [{"name": a, "id": f"UC_{a.lower()}"} for a in artistas],
+        "album": {"name": album, "id": f"MPRE_{album}"} if album else None,
+        "duration_seconds": dur,
+        "setVideoId": set_id or f"set-{vid}",
+    }
+
+
+class FalsoYT:
+    def __init__(self):
+        self.conta = "Roberto"
+        self.curtidas: list[dict] = []
+        self.playlists: dict[str, dict] = {}  # id -> {"title", "tracks", "owned"}
+        self.albuns: dict[str, dict] = {}
+        self.falhar_album: set[str] = set()
+        self.chamadas = Counter()
+
+    def get_account_info(self):
+        self.chamadas["get_account_info"] += 1
+        return {"accountName": self.conta}
+
+    def get_liked_songs(self, limit=100):
+        self.chamadas["get_liked_songs"] += 1
+        return {"trackCount": len(self.curtidas), "tracks": list(self.curtidas)}
+
+    def get_library_playlists(self, limit=25):
+        self.chamadas["get_library_playlists"] += 1
+        itens = [{"playlistId": "LM", "title": "Liked Music", "count": str(len(self.curtidas))}]
+        for pid, p in self.playlists.items():
+            itens.append({"playlistId": pid, "title": p["title"], "count": f"{len(p['tracks'])} songs"})
+        return itens
+
+    def get_playlist(self, playlistId, limit=100):
+        self.chamadas["get_playlist"] += 1
+        p = self.playlists[playlistId]
+        return {
+            "id": playlistId,
+            "title": p["title"],
+            "owned": p.get("owned", True),
+            "tracks": list(p["tracks"]),
+        }
+
+    def get_album(self, browseId):
+        self.chamadas["get_album"] += 1
+        if browseId in self.falhar_album:
+            raise Exception("HTTP 404: álbum indisponível")
+        return self.albuns.get(browseId, {"title": browseId, "year": "2020", "description": "desc"})
+
+
+def biblioteca_exemplo(caminho_banco):
+    """Banco sincronizado com 6 curtidas e a árvore 'Rock - All' (agregadora) + 2 filhas + 'Dormir'."""
+    from curator.banco.conexao import abrir
+    from curator.coleta.cliente import ClienteYT
+    from curator.coleta.sincronizar import sincronizar_curtidas, sincronizar_playlists
+
+    yt = FalsoYT()
+    yt.curtidas = [faixa(v) for v in "abcdef"]
+    yt.playlists = {
+        "PLall": {"title": "Rock - All", "tracks": [faixa("a"), faixa("b"), faixa("c")]},
+        "PLarena": {"title": "Rock - Arena", "tracks": [faixa("a"), faixa("x")]},
+        "PLfolk": {"title": "Rock - Folk", "tracks": [faixa("b")]},
+        "PLsono": {"title": "Dormir", "tracks": [faixa("d")]},
+    }
+    con = abrir(caminho_banco)
+    cli = ClienteYT(yt, intervalo_s=0, dormir=lambda s: None)
+    sincronizar_curtidas(con, cli)
+    sincronizar_playlists(con, cli)
+    return con
+
+
+HIERARQUIA_ROCK = """
+[[playlist]]
+id = "PLall"
+tipo = "agregadora"
+[[playlist]]
+id = "PLarena"
+mae = "PLall"
+[[playlist]]
+id = "PLfolk"
+mae = "PLall"
+"""
