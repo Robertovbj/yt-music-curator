@@ -19,6 +19,7 @@ def imprimir_resumo(titulo: str, resumo) -> None:
 def sincronizar(
     forcar: bool = typer.Option(False, "--forcar", help="Ignora caches e rebaixa tudo."),
     sem_metadados: bool = typer.Option(False, "--sem-metadados", help="Pula a busca de dados de álbum."),
+    sem_fila: bool = typer.Option(False, "--sem-fila", help="Não põe faixas novas na fila de análise."),
 ) -> None:
     """Curtidas, playlists próprias, pertencimento e metadados de álbum."""
     from curator.coleta.sincronizar import completar_metadados, sincronizar_curtidas, sincronizar_playlists
@@ -33,3 +34,7 @@ def sincronizar(
         imprimir_resumo(
             "álbuns", completar_metadados(con, cli, ttl_dias=cfg["metadados"]["ttl_dias"], forcar=forcar)
         )
+    if not sem_fila:
+        from curator.interfaces.comandos.analise import enfileirar
+
+        typer.echo(f"fila de análise: {enfileirar(con)} faixa(s) nova(s)")

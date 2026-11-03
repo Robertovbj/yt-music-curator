@@ -1,0 +1,10 @@
+[Unit]
+Description=yt-music-curator: dispara o lote diário de análise
+
+[Timer]
+OnCalendar=*-*-* 01:30
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

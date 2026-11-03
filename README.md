@@ -43,6 +43,33 @@ uv run curator estatisticas
 
 A sincronização é total: uma música removida de uma playlist no YouTube Music some do banco. Uma playlist com a mesma contagem, sincronizada há menos de 24 h, não é baixada de novo (`--forcar` ignora esses caches).
 
+### Análise de áudio
+
+Requer o extra `analise`, além de `ffmpeg`/`ffprobe` e `deno` no sistema (o yt-dlp usa o Deno para resolver o desafio JavaScript do YouTube).
+
+```sh
+uv run curator modelos baixar        # 22 modelos Essentia (~38 MB), verificados por SHA-256
+uv run curator analisar --limite 5   # baixa, analisa, grava e apaga o áudio
+uv run curator fila status           # pendentes, erros, saídas, estimativa de dias
+uv run curator analisar --ate 07:00  # lote até um horário
+```
+
+O `sincronizar` já põe as faixas novas na fila. O worker respeita uma cota diária por saída de rede, pausa 20–60 s entre downloads, põe a saída em quarentena quando o YouTube pede "confirme que não é um robô" e tenta outros provedores (busca no YouTube, SoundCloud, Bandcamp, pasta local) quando a faixa não está disponível. Proxies e provedores ficam no `config.toml`:
+
+```toml
+[fila]
+cota_diaria = 200
+
+[[proxy]]
+nome = "vps"
+url = "socks5://usuario:senha@host:1080"
+
+[pasta_local]
+caminho = "~/Música"   # depois: uv run curator pasta-local
+```
+
+Para rodar todo dia em segundo plano, veja `contrib/systemd/`.
+
 ## Desenvolvimento
 
 ```sh
