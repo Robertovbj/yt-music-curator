@@ -5,6 +5,10 @@ Decisões por tipo de erro:
 - ErroIndisponivel / áudio inválido / nenhum candidato confiável: tenta o próximo provedor.
 - Qualquer outro erro: a faixa volta mais tarde (backoff); a saída acumula falha.
 Esgotados os provedores, a faixa fica `sem-audio`.
+
+Modo paralelo (`rodar_em_paralelo`): um worker por saída ativa, cada um numa thread com a própria conexão
+ao banco e o próprio ritmo de pausas. Os downloads correm em paralelo; a análise do Essentia é serializada
+por uma trava (uma cópia só dos modelos na memória, ~2 GB).
 """
 
 import json
@@ -12,6 +16,7 @@ import logging
 import random
 import signal
 import tempfile
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -52,11 +57,46 @@ class Progresso:
     artistas: list[str]
     resultado: str  # ok | sem_audio | erro | bloqueio
     segundos: float
+    saida: str | None = None
 
     def linha(self) -> str:
         total = self.limite if self.limite is not None else "∞"
         quem = f"{self.titulo} — {', '.join(self.artistas[:2])}" if self.artistas else self.titulo
-        return f"[{self.n}/{total}] {quem} · {self.resultado.replace('_', ' ')} em {self.segundos:.0f} s"
+        por = f" ({self.saida})" if self.saida else ""
+        return f"[{self.n}/{total}]{por} {quem} · {self.resultado.replace('_', ' ')} em {self.segundos:.0f} s"
+
+
+class Compartilhado:
+    """O que os workers de um mesmo lote dividem: o limite de faixas, o pedido de parada e a numeração."""
+
+    def __init__(self, limite: int | None = None):
+        self.limite = limite
+        self.processadas = 0
+        self.evento_parar = threading.Event()
+        self._trava = threading.Lock()
+
+    def reservar_vaga(self) -> int | None:
+        with self._trava:
+            if self.limite is not None and self.processadas >= self.limite:
+                return None
+            self.processadas += 1
+            return self.processadas
+
+    def devolver_vaga(self) -> None:
+        with self._trava:
+            self.processadas -= 1
+
+
+class AnalisadorTravado:
+    """Um analisador só para todas as threads: o Essentia/TensorFlow roda uma faixa por vez."""
+
+    def __init__(self, analisador):
+        self._a, self._trava = analisador, threading.Lock()
+        self.hash_modelos = analisador.hash_modelos
+
+    def analisar(self, caminho):
+        with self._trava:
+            return self._a.analisar(caminho)
 
 
 def carregar_faixa(con, video_id: str) -> FaixaAlvo:
@@ -80,65 +120,93 @@ class Worker:
         analisador,
         provedores: dict[str, ProvedorAudio],
         relogio: Callable[[], datetime] = lambda: datetime.now(UTC),
-        dormir: Callable[[float], None] = time.sleep,
+        dormir: Callable[[float], None] | None = None,
         rng: random.Random | None = None,
+        saida: str | None = None,
+        compartilhado: Compartilhado | None = None,
     ):
         self.con, self.cfg, self.analisador, self.provedores = con, cfg, analisador, provedores
-        self.relogio, self.dormir, self.rng = relogio, dormir, rng or random.Random()
-        self.parar = False
+        self.comp = compartilhado or Compartilhado()
+        # a pausa padrão acorda na hora se pedirem parada (em vez de terminar um sleep de 30 s)
+        self.relogio, self.dormir, self.rng = (
+            relogio,
+            dormir or self.comp.evento_parar.wait,
+            rng or random.Random(),
+        )
+        self.saida = saida
         self.limiar = cfg["provedores"]["limiar_casamento"]
         self.tolerancia = cfg["provedores"]["tolerancia_duracao_s"]
         self.max_tentativas = cfg["fila"]["max_tentativas"]
 
-    def instalar_sinais(self) -> None:
-        def pedir_parada(signum, _frame):
-            log.warning("sinal %s recebido: termino a faixa atual e paro", signum)
-            self.parar = True
+    @property
+    def parar(self) -> bool:
+        return self.comp.evento_parar.is_set()
 
-        signal.signal(signal.SIGTERM, pedir_parada)
-        signal.signal(signal.SIGINT, pedir_parada)
+    @parar.setter
+    def parar(self, valor: bool) -> None:
+        if valor:
+            self.comp.evento_parar.set()
+
+    def instalar_sinais(self) -> None:
+        instalar_sinais(self.comp)
 
     def rodar(
         self,
         limite: int | None = None,
         ate: datetime | None = None,
         ao_processar: Callable[[Progresso], None] | None = None,
+        preparar: bool = True,
     ) -> Relatorio:
-        """`ao_processar` recebe um `Progresso` depois de cada faixa (a CLI imprime uma linha por faixa)."""
+        """`ao_processar` recebe um `Progresso` depois de cada faixa (a CLI imprime uma linha por faixa).
+
+        `preparar=False` no modo paralelo: o lote já sincronizou as saídas e recuperou a fila uma vez só
+        (recuperar em cada thread devolveria à fila o item que outra thread está baixando)."""
         rel = Relatorio()
-        proxies.sincronizar_config(self.con, self.cfg)
-        if n := fila.recuperar(self.con):
-            log.info("%d item(ns) interrompido(s) voltaram para a fila", n)
-        processadas = 0
+        if limite is not None:
+            self.comp.limite = limite
+        if preparar:
+            proxies.sincronizar_config(self.con, self.cfg)
+            if n := fila.recuperar(self.con):
+                log.info("%d item(ns) interrompido(s) voltaram para a fila", n)
         while True:
             if self.parar:
                 rel.motivo_parada = "interrompido"
                 break
-            if limite is not None and processadas >= limite:
-                rel.motivo_parada = f"limite de {limite} faixa(s)"
-                break
             if ate and self.relogio() >= ate:
                 rel.motivo_parada = "horário-limite"
                 break
-            item = fila.proximo(self.con, self.relogio(), self.max_tentativas)
+            vaga = self.comp.reservar_vaga()
+            if vaga is None:
+                rel.motivo_parada = f"limite de {self.comp.limite} faixa(s)"
+                break
+            item = fila.reservar(self.con, self.relogio(), self.max_tentativas)
             if item is None:
+                self.comp.devolver_vaga()
                 break
             inicio = time.perf_counter()
             resultado, usou_rede = self._processar(item)
+            if resultado in ("sem_saida", "bloqueio"):
+                self.comp.devolver_vaga()  # não conta para o limite
             if resultado == "sem_saida":
-                rel.motivo_parada = "todas as saídas em quarentena ou sem cota"
+                rel.motivo_parada = (
+                    "todas as saídas em quarentena ou sem cota"
+                    if self.saida is None
+                    else f"saída {self.saida} em quarentena ou sem cota"
+                )
                 rel.proxima_liberacao = proxies.proxima_liberacao(self.con, self.relogio())
                 break
             rel.contagem[resultado] += 1
-            if resultado != "bloqueio":
-                processadas += 1
             segundos = time.perf_counter() - inicio
             if resultado == "ok":
                 rel.segundos_por_faixa.append(segundos)
             if ao_processar:
                 f = carregar_faixa(self.con, item["video_id"])
-                ao_processar(Progresso(processadas, limite, f.titulo, f.artistas, resultado, segundos))
-            if usou_rede and not self.parar and (limite is None or processadas < limite):
+                n = vaga if resultado != "bloqueio" else self.comp.processadas
+                ao_processar(
+                    Progresso(n, self.comp.limite, f.titulo, f.artistas, resultado, segundos, self.saida)
+                )
+            restam = self.comp.limite is None or self.comp.processadas < self.comp.limite
+            if usou_rede and not self.parar and restam:
                 f = self.cfg["fila"]
                 self.dormir(self.rng.uniform(f["intervalo_min_s"], f["intervalo_max_s"]))
         return rel
@@ -155,7 +223,7 @@ class Worker:
                 continue
             saida: Saida | None = None
             if prov.usa_rede:
-                saida = proxies.escolher(self.con, self.relogio())
+                saida = proxies.escolher(self.con, self.relogio(), self.saida)
                 if saida is None:
                     fila.marcar(self.con, vid, "pendente", provedores_tentados=tentados)
                     return "sem_saida", usou_rede
@@ -225,3 +293,77 @@ class Worker:
 
 def _resumir(e: Exception) -> str:
     return str(e).splitlines()[0][:160] if str(e) else type(e).__name__
+
+
+# ------------------------------------------------------------------ vários workers, um por saída
+
+
+def instalar_sinais(comp: Compartilhado) -> None:
+    def pedir_parada(signum, _frame):
+        log.warning("sinal %s recebido: termino as faixas em andamento e paro", signum)
+        comp.evento_parar.set()
+
+    signal.signal(signal.SIGTERM, pedir_parada)
+    signal.signal(signal.SIGINT, pedir_parada)
+
+
+_PRIORIDADE = ("interrompido", "horário-limite", "limite", "fila vazia")
+
+
+def _juntar(relatorios: list[Relatorio]) -> Relatorio:
+    out = Relatorio()
+    for r in relatorios:
+        out.contagem.update(r.contagem)
+        out.segundos_por_faixa += r.segundos_por_faixa
+    motivos = [r.motivo_parada for r in relatorios]
+    out.motivo_parada = next(
+        (m for p in _PRIORIDADE for m in motivos if m.startswith(p)),
+        "todas as saídas em quarentena ou sem cota",
+    )
+    liberacoes = [r.proxima_liberacao for r in relatorios if r.proxima_liberacao]
+    out.proxima_liberacao = min(liberacoes) if liberacoes and out.motivo_parada.startswith("todas") else None
+    return out
+
+
+def rodar_em_paralelo(
+    caminho_banco,
+    cfg: dict,
+    analisador,
+    montar_provedores: Callable,
+    limite: int | None = None,
+    ate: datetime | None = None,
+    ao_processar: Callable[[Progresso], None] | None = None,
+    compartilhado: Compartilhado | None = None,
+    **kw,
+) -> Relatorio:
+    """Um worker por saída ativa (direta + proxies do config), em threads, dividindo limite e parada."""
+    from curator.banco.conexao import abrir
+
+    con = abrir(caminho_banco)
+    proxies.sincronizar_config(con, cfg)
+    if n := fila.recuperar(con):
+        log.info("%d item(ns) interrompido(s) voltaram para a fila", n)
+    saidas = [s["nome"] for s in proxies.estado(con, datetime.now(UTC))]
+    comp = compartilhado or Compartilhado(limite)
+    comp.limite = limite
+    an = AnalisadorTravado(analisador)
+    relatorios: list[Relatorio] = []
+    trava = threading.Lock()
+
+    def tarefa(nome: str) -> None:
+        c = abrir(caminho_banco)
+        try:
+            w = Worker(c, cfg, an, montar_provedores(cfg, c), saida=nome, compartilhado=comp, **kw)
+            r = w.rodar(ate=ate, ao_processar=ao_processar, preparar=False)
+        except Exception:
+            log.exception("worker da saída %s parou com erro", nome)
+            r = Relatorio(motivo_parada=f"erro na saída {nome}")
+        with trava:
+            relatorios.append(r)
+
+    threads = [threading.Thread(target=tarefa, args=(n,), name=f"saida-{n}") for n in saidas]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return _juntar(relatorios)

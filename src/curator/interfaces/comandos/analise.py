@@ -60,24 +60,27 @@ def analisar(
 
 
 def _rodar_worker(Analisador, limite: int | None, ate: str | None):  # noqa: N803
+    """Um worker por saída de rede ativa (direta + [[proxy]] do config), downloads em paralelo."""
     from curator.audio import provedores
-    from curator.audio.worker import Worker
+    from curator.audio.worker import Compartilhado, instalar_sinais, rodar_em_paralelo
 
     cfg, con = carregar_config(), banco()
     if n := enfileirar(con):
         typer.echo(f"{n} faixa(s) nova(s) na fila")
-    typer.echo("carregando modelos…", err=True)
+    proxies.sincronizar_config(con, cfg)
+    saidas = [s["nome"] for s in proxies.estado(con, datetime.now(UTC))]
+    typer.echo(f"carregando modelos… ({len(saidas)} saída(s): {', '.join(saidas)})", err=True)
     try:
         analisador = Analisador(caminhos().modelos_dir)
     except RuntimeError as e:
         falhar(str(e))
-    worker = Worker(con, cfg, analisador, provedores.montar(cfg, con))
-    worker.instalar_sinais()
-    return worker.rodar(
-        limite=limite,
-        ate=_horario(ate) if ate else None,
-        ao_processar=lambda p: typer.echo(p.linha(), err=True),
-    )
+    comp = Compartilhado(limite)
+    instalar_sinais(comp)
+    return rodar_em_paralelo(
+        caminhos().banco, cfg, analisador, provedores.montar,
+        limite=limite, ate=_horario(ate) if ate else None,
+        ao_processar=lambda p: typer.echo(p.linha(), err=True), compartilhado=comp,
+    )  # fmt: skip
 
 
 @fila_app.command("status")

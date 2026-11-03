@@ -49,13 +49,16 @@ def sincronizar_config(con: sqlite3.Connection, cfg: dict) -> None:
 _USO = "CASE WHEN dia_uso = :hoje THEN uso_hoje ELSE 0 END"
 
 
-def escolher(con: sqlite3.Connection, agora: datetime) -> Saida | None:
-    """A saída ativa, fora de quarentena e com cota, menos usada hoje (empate: a usada há mais tempo)."""
+def escolher(con: sqlite3.Connection, agora: datetime, nome: str | None = None) -> Saida | None:
+    """A saída ativa, fora de quarentena e com cota, menos usada hoje (empate: a usada há mais tempo).
+
+    Com `nome`, só aquela saída (no modo paralelo cada worker tem a sua)."""
     linha = con.execute(
         f"""SELECT nome, url FROM proxies
             WHERE ativo = 1 AND (quarentena_ate IS NULL OR quarentena_ate <= :agora) AND {_USO} < cota_diaria
+              AND (:nome IS NULL OR nome = :nome)
             ORDER BY {_USO}, coalesce(ultimo_uso_em, ''), nome LIMIT 1""",
-        {"agora": _iso(agora), "hoje": _hoje(agora)},
+        {"agora": _iso(agora), "hoje": _hoje(agora), "nome": nome},
     ).fetchone()
     return Saida(linha["nome"], linha["url"]) if linha else None
 
