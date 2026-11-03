@@ -230,3 +230,70 @@ def plano_descartar(plano_id: int) -> None:
     if not planos.descartar(banco(), plano_id):
         falhar(f"plano #{plano_id} não existe ou não está pendente")
     typer.echo(f"plano #{plano_id} descartado")
+
+
+def _confirmar(pergunta: str, sim: bool) -> None:
+    import sys
+
+    if sim:
+        return
+    if not sys.stdin.isatty():
+        falhar("sem terminal interativo: confira o diff com `curator plano mostrar` e rode de novo com --sim")
+    if not typer.confirm(pergunta, default=False):
+        falhar("nada foi alterado", codigo=0)
+
+
+@plano_app.command("aplicar")
+def plano_aplicar(
+    plano_id: int | None = typer.Argument(None, help="Padrão: o pendente mais recente."),
+    sim: bool = typer.Option(False, "--sim", help="Não pergunta (para scripts)."),
+    grande: bool = typer.Option(
+        False, "--grande", help="Necessário quando o plano passa do limite de faixas."
+    ),
+) -> None:
+    """Aplica um plano no YouTube Music, depois de mostrar o diff e pedir confirmação."""
+    from curator.coleta import aplicar as ap
+    from curator.config import carregar_config
+    from curator.interfaces.comandos.auth import cliente
+
+    con = banco()
+    if plano_id is None:
+        pend = planos.listar(con, "pendente")
+        if not pend:
+            falhar("nenhum plano pendente")
+        plano_id = pend[0]["plano_id"]
+    achado = planos.obter(con, plano_id)
+    if achado is None:
+        falhar(f"plano #{plano_id} não existe")
+    meta, ops = achado
+    typer.echo(f"plano #{plano_id} · {meta['origem']}\n\n{planos.diff_legivel(con, ops)}\n")
+    n, limite = ap.total_faixas(ops), carregar_config()["planos"]["limite_faixas"]
+    if n > limite and not grande:
+        falhar(f"o plano mexe em {n} faixas (limite {limite}); confira o diff e rode de novo com --grande")
+    _confirmar(f"Aplicar estas alterações ({n} faixa(s)) no YouTube Music?", sim)
+    try:
+        res = ap.aplicar(con, cliente(), plano_id)
+    except ap.PlanoInvalido as e:
+        falhar(str(e))
+    for x in res.log:
+        typer.echo(f"  {'ok ' if x['ok'] else 'ERRO'} {x['tipo']:<9} {x['playlist']}: {x['detalhe']}")
+    for d in res.divergencias:
+        aviso(d)
+    typer.echo(f"plano #{plano_id}: {res.status}. Para voltar atrás: `curator plano desfazer {plano_id}`")
+    if res.status != "aplicado":
+        raise typer.Exit(1)
+
+
+@plano_app.command("desfazer")
+def plano_desfazer(plano_id: int, sim: bool = typer.Option(False, "--sim")) -> None:
+    """Volta as playlists ao estado de antes do plano e apaga as que ele criou."""
+    from curator.coleta import aplicar as ap
+    from curator.interfaces.comandos.auth import cliente
+
+    _confirmar(f"Desfazer o plano #{plano_id} no YouTube Music (inclui apagar playlists que ele criou)?", sim)
+    try:
+        for linha in ap.desfazer(banco(), cliente(), plano_id):
+            typer.echo(f"  {linha}")
+    except ap.PlanoInvalido as e:
+        falhar(str(e))
+    typer.echo(f"plano #{plano_id} desfeito")

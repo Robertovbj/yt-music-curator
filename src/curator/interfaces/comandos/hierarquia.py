@@ -77,3 +77,18 @@ def verificar() -> None:
             nomes = ", ".join(a["nome"] for a in json.loads(linha["artistas"]))
             typer.echo(f"  - {linha['titulo']} — {nomes}")
     raise typer.Exit(2)
+
+
+@hier_app.command("corrigir")
+def corrigir() -> None:
+    """Gera um plano que põe nas agregadoras as faixas das filhas que estão faltando."""
+    from curator.motor import planos
+
+    try:
+        pid = planos.de_agregadoras(banco())
+    except ValueError:
+        typer.echo("ok: nada a corrigir")
+        return
+    typer.echo(
+        f"plano #{pid} criado; confira com `curator plano mostrar {pid}` e aplique com `curator plano aplicar {pid}`"
+    )

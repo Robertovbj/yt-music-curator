@@ -21,6 +21,8 @@ class FalsoYT:
         self.playlists: dict[str, dict] = {}  # id -> {"title", "tracks", "owned"}
         self.albuns: dict[str, dict] = {}
         self.falhar_album: set[str] = set()
+        self.falhar_escrita: set[str] = set()
+        self._seq = 0
         self.chamadas = Counter()
 
     def get_account_info(self):
@@ -45,8 +47,48 @@ class FalsoYT:
             "id": playlistId,
             "title": p["title"],
             "owned": p.get("owned", True),
+            "trackCount": len(p["tracks"]),
             "tracks": list(p["tracks"]),
         }
+
+    # ------------------------------------------------------------ escrita (M7)
+
+    def create_playlist(
+        self, title, description, privacy_status="PRIVATE", video_ids=None, source_playlist=None
+    ):
+        self.chamadas["create_playlist"] += 1
+        pid = f"PLnova{len(self.playlists)}"
+        self.playlists[pid] = {"title": title, "tracks": [], "privacy": privacy_status}
+        return pid
+
+    def add_playlist_items(self, playlistId, videoIds=None, source_playlist=None, duplicates=False):
+        self.chamadas["add_playlist_items"] += 1
+        if playlistId in self.falhar_escrita:
+            return {"status": "STATUS_FAILED"}
+        p = self.playlists[playlistId]
+        for v in videoIds:
+            if duplicates or v not in [t["videoId"] for t in p["tracks"]]:
+                self._seq += 1
+                p["tracks"].append(faixa(v, set_id=f"set-{self._seq}"))
+        return {"status": "STATUS_SUCCEEDED"}
+
+    def remove_playlist_items(self, playlistId, videos):
+        self.chamadas["remove_playlist_items"] += 1
+        sets = {v["setVideoId"] for v in videos}
+        p = self.playlists[playlistId]
+        p["tracks"] = [t for t in p["tracks"] if t["setVideoId"] not in sets]
+        return "STATUS_SUCCEEDED"
+
+    def edit_playlist(self, playlistId, title=None, **kw):
+        self.chamadas["edit_playlist"] += 1
+        if title:
+            self.playlists[playlistId]["title"] = title
+        return "STATUS_SUCCEEDED"
+
+    def delete_playlist(self, playlistId):
+        self.chamadas["delete_playlist"] += 1
+        del self.playlists[playlistId]
+        return "STATUS_SUCCEEDED"
 
     def get_album(self, browseId):
         self.chamadas["get_album"] += 1
