@@ -336,6 +336,10 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 **Risco registrado:** baixar pelo yt-dlp já vai contra os termos do YouTube, e o proxy não muda isso. O uso fica restrito à **análise pessoal** das suas próprias curtidas, e o áudio é apagado logo depois.
 
+- *Implementação (2026-11-03):* **uma thread de download por saída**, cada uma com o próprio ritmo (pausa de 10–20 s, `sleep_requests` 0,75 s, como o preset `-t sleep` do yt-dlp) e a própria cota (1200/dia). A fila é reservada com um `UPDATE … RETURNING` atômico, então duas saídas nunca pegam a mesma faixa. A análise do Essentia continua serializada por uma trava: uma cópia dos modelos na memória (~2 GB) e ~5 s por faixa dão conta de ~700 faixas/hora.
+- As saídas extras rodam em containers (`contrib/saidas/compose.yml`), cada um expondo um SOCKS5 só em `127.0.0.1`. **VPN:** OpenVPN + dante com `external: tun0`; se o túnel cair, o proxy falha em vez de vazar pela conexão de casa. Os DNS são os que a VPN empurra, porque o DNS embutido do Docker não funciona com todo o tráfego no túnel. **Celular:** Tailscale em modo userspace usando o celular como exit node. Só vale nos dados móveis: no Wi-Fi de casa ele sai pelo mesmo IP da conexão direta.
+- A rede do host não é alterada: a VPN e o exit node valem só dentro dos containers.
+
 ### 8.4 Fallback para outros provedores (faixa completa)
 
 - Interface `ProvedorAudio`: `buscar(faixa) -> [candidatos]` e `baixar(candidato) -> arquivo`. A ordem dos provedores é configurável.
