@@ -12,6 +12,20 @@ from curator.texto import normalizar, normalizar_titulo
 
 _TOPIC = re.compile(r"\s*-\s*topic$", re.IGNORECASE)
 
+# Versões alternativas: mesmo título, artista e duração, mas outra gravação. Na validação da #19 o
+# SoundCloud aceitou "Yuzu - Reason MIDI" para "Reason" (0,84). Se o candidato tem um destes marcadores
+# e a faixa da biblioteca não, é recusado.
+_VARIANTE = re.compile(
+    r"\b(midi|cover|covers|remix|remixed|slowed|reverb|reverbed|sped up|speed up|nightcore|8d|karaoke|"
+    r"instrumental|piano|guitar|violin|marimba|tutorial|beat saber|lofi|lo fi|acapella|a cappella|"
+    r"bass boosted|mashup|extended|1 hour|loop|live)\b"
+    r"|歌ってみた|弾いてみた|叩いてみた|カバー|翻唱|ピアノ",
+)
+
+
+def variantes(titulo: str) -> set[str]:
+    return {m.group(0) for m in _VARIANTE.finditer(normalizar(titulo))}
+
 
 def _sim(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
@@ -20,6 +34,8 @@ def _sim(a: str, b: str) -> float:
 def score(
     faixa: FaixaAlvo, titulo: str, artista: str | None, duracao_s: float | None, tolerancia_s: float = 3
 ) -> float:
+    if variantes(titulo) - variantes(faixa.titulo):
+        return 0.0
     artistas = [normalizar(a) for a in faixa.artistas if a]
     cand_artista = normalizar(_TOPIC.sub("", artista or ""))
     cand_titulo = normalizar_titulo(titulo)

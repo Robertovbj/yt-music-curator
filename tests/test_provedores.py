@@ -116,10 +116,24 @@ def test_pasta_local_indexa_e_casa_por_tags(tmp_path):
 def test_montar_respeita_ordem_e_pula_pasta_sem_caminho(tmp_path):
     cfg = carregar_config()
     con = abrir(tmp_path / "c.db")
-    assert list(provedores.montar(cfg, con)) == ["youtube_music", "youtube_busca", "soundcloud", "bandcamp"]
+    assert list(provedores.montar(cfg, con)) == ["youtube_music", "youtube_busca", "soundcloud"]
     cfg["pasta_local"]["caminho"] = str(tmp_path)
     cfg["provedores"]["ordem"] = ["pasta_local", "youtube_music"]
     assert list(provedores.montar(cfg, con)) == ["pasta_local", "youtube_music"]
     cfg["provedores"]["ordem"] = ["spotify"]
     with pytest.raises(ValueError, match="desconhecido"):
         provedores.montar(cfg, con)
+
+
+def test_bandcamp_com_desafio_js_e_indisponivel():
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    pagina = b"<html><head><title>Client Challenge</title></head><body>JavaScript is disabled</body></html>"
+    b = Bandcamp("bestaudio", abrir_url=lambda req, timeout: R(pagina))
+    with pytest.raises(ErroIndisponivel, match="desafio JavaScript"):
+        b.buscar(FaixaAlvo("v", "x", ["y"], 200), None)

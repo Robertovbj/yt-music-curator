@@ -311,7 +311,8 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 - **Fila retomável e serial** (`fila_download`): sobrevive a quedas e reinícios e pode rodar como systemd timer.
 - **Intervalo aleatório** entre downloads (`sleep_interval` = 20 s, `max_sleep_interval` = 60 s) e `sleep_requests` entre requisições internas.
-- **Cota diária por saída** (direta ou proxy). Começar com 150–300 por dia e ajustar pela taxa de erro.
+- **Cota diária por saída** (direta ou proxy). Começar com 150–300 por dia e ajustar pela taxa de erro. O dia da cota é o **dia local** (em UTC ele viraria às 21h em -03 e daria duas cotas no mesmo dia).
+  - *2026-11-03:* depois de 58 downloads sem bloqueio, a cota da saída direta foi para **500/dia**, com pausa de 10–30 s, rodando o dia todo pelo serviço do systemd.
 - **Backoff exponencial** com *jitter* em HTTP 429 e 403.
 - **Disjuntor:** a mensagem "Sign in to confirm you're not a bot" (ou erros parecidos) põe aquela saída em **quarentena por algumas horas**. A fila segue pelas outras saídas ou espera.
 
@@ -341,6 +342,8 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
   - ISRC, quando disponível.
 
   Abaixo do limiar de confiança, a faixa fica marcada como **"sem áudio"**. **Analisar a música errada é pior que não analisar.**
+- **Versões alternativas são recusadas:** se o título do candidato tem um marcador como MIDI, cover, remix, slowed, nightcore, karaoke, piano, live ou 歌ってみた, e a faixa da biblioteca não tem, o score vai a zero.
+- **Validação (#19, 2026-11-03):** 20 faixas sorteadas das curtidas, só busca. Antes da regra de versões houve 1 falso positivo ("Yuzu - Reason MIDI" para "Reason"); depois, **0 falsos positivos**, e **10 das 20** recuperáveis pelo YouTube (busca) ou pelo SoundCloud. As que ficaram sem fallback são, na maioria, OSTs da HoYoverse reenviadas por terceiros com títulos longos, onde o casamento é conservador de propósito. A busca no YouTube recusou corretamente "The Strength of Sin Is the Law" para "The Sting of Death Is Sin".
 - `analises.fonte_audio` registra de onde veio o áudio, para auditoria e reanálise.
 
 Ordem proposta:
@@ -348,6 +351,7 @@ Ordem proposta:
 1. **YouTube Music, pelo `video_id`**: o mesmo áudio da curtida.
 2. **Outro vídeo do YouTube com a mesma música**, achado por busca e casado pela duração. Útil quando o vídeo original está indisponível na região ou com restrição de idade.
 3. **SoundCloud** e **Bandcamp**, que o yt-dlp já suporta: faixas completas e sem DRM quando o artista libera o stream. A cobertura é boa para independentes e ruim para catálogo de gravadora grande.
+   - *Revisado (2026-11-03):* a busca do Bandcamp responde com um desafio anti-robô em JavaScript ("Client Challenge"). O projeto não contorna isso: o provedor saiu da ordem padrão e, se for recolocado no config, falha com essa mensagem.
 4. **Pasta local**: arquivos que você já tem, comprados ou ripados. São indexados por tags e por fingerprint **Chromaprint/AcoustID**, o que permite casar mesmo com tags ruins.
 
 **Fora como fonte de áudio: Spotify, Deezer, Apple Music e Tidal.** Nesses serviços a faixa completa é protegida por DRM (Widevine, FairPlay ou criptografia própria), e baixá-la exigiria burlar essa proteção, o que não faz parte do projeto. Ferramentas como o spotDL, na prática, pegam os **metadados** no Spotify e baixam o **áudio do YouTube**, o que cai de novo no 8.1–8.3.

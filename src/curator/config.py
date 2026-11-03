@@ -39,7 +39,8 @@ PADRAO: dict = {
         "cookies": "",  # arquivo de cookies de uma conta SECUNDÁRIA; vazio = sem cookies
     },
     "provedores": {
-        "ordem": ["youtube_music", "youtube_busca", "soundcloud", "bandcamp", "pasta_local"],
+        # "bandcamp" fica fora: a busca exige desafio JS (ver provedores/bandcamp.py); dá para pôr de volta no config
+        "ordem": ["youtube_music", "youtube_busca", "soundcloud", "pasta_local"],
         "limiar_casamento": 0.82,
         "tolerancia_duracao_s": 3,
     },
