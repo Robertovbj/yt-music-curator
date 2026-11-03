@@ -70,6 +70,30 @@ caminho = "~/Música"   # depois: uv run curator pasta-local
 
 Para rodar todo dia em segundo plano, veja `contrib/systemd/`.
 
+### Receitas, classificação e planos
+
+Uma **receita** descreve uma playlist em JSON (o que o Claude vai escrever via MCP); o motor escolhe as músicas de forma determinística: mesma receita + mesmo banco = mesma lista.
+
+```json
+{
+  "nome": "Dormir",
+  "tamanho": 40,
+  "filtros": {"excluir_artistas": ["HOYO-MiX"], "bpm": [50, 100], "max": {"aggressive": 0.2}},
+  "perfil_alvo": {"relaxed": {"alvo": 0.9, "peso": 2}, "arousal": {"alvo": 0.15}, "energy": {"alvo": 0.1}},
+  "diversidade": {"lambda": 0.75, "max_por_artista": 3}
+}
+```
+
+```sh
+uv run curator receita criar dormir.json --pedido "músicas para dormir, sem Hoyoverse"
+uv run curator receita executar Dormir --plano-nova    # lista + plano criando a playlist
+uv run curator classificar --plano                      # onde colocar as curtidas não alocadas
+uv run curator avaliar-classificacao --mae "Rock - All" # leave-one-out nas filhas
+uv run curator plano mostrar                            # o diff, agrupado por playlist
+```
+
+Nomes de artistas, gêneros, features e playlists são conferidos com o banco; um nome errado é recusado com sugestão (`quis dizer: Banda Rock?`). Nada é aplicado no YouTube Music ainda: os planos ficam guardados para o M7.
+
 ## Desenvolvimento
 
 ```sh
