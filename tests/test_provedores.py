@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +51,71 @@ def test_opcoes_do_ytdlp_sem_cookies_e_com_proxy():
     assert o["proxy"] == "socks5://10.0.0.1:1080" and o["sleep_interval_requests"] == 1.5
     assert "cookiefile" not in o and "postprocessors" not in o  # sem conversão para WAV
     assert YouTubeMusic("x")._opcoes(None)["proxy"] == ""  # direta, ignorando proxy do ambiente
+
+
+class YoutubeDLFalso:
+    """Registra o que o provedor pediu ao yt-dlp, sem rede."""
+
+    chamadas = []
+
+    def __init__(self, opts):
+        self.opts = opts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def extract_info(self, url, download):
+        self.chamadas.append(("extract_info", download, self.opts))
+        info = {"url": "https://googlevideo/x", "ext": "webm", "duration": 3600, "filesize": 36_000_000,
+                "http_headers": {"User-Agent": "ua"}}  # fmt: skip
+        if download:
+            self.arquivo = Path(self.opts["outtmpl"].replace("%(ext)s", "webm"))
+            self.arquivo.write_bytes(b"\0" * 10)
+        return info
+
+    def prepare_filename(self, info):
+        return str(self.arquivo)
+
+    def urlopen(self, pedido):
+        self.chamadas.append(("urlopen", pedido.headers, self.opts))
+        return io.BytesIO(b"\1" * 500)
+
+
+@pytest.fixture
+def ytdl_falso(monkeypatch):
+    import yt_dlp
+
+    YoutubeDLFalso.chamadas = []
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", YoutubeDLFalso)
+    return YoutubeDLFalso.chamadas
+
+
+def test_faixa_longa_baixa_so_o_comeco_pela_saida(ytdl_falso, tmp_path):
+    from curator.audio.provedores.base import Candidato, Saida
+
+    c = Candidato(
+        "youtube_music", "https://music.youtube.com/watch?v=x", "Medley", None, 3600, 1.0, exato=True
+    )
+    a = YouTubeMusic("bestaudio").baixar(c, tmp_path, Saida("vpn", "socks5://127.0.0.1:1081"))
+    assert a.parcial and a.bytes == 500 and a.caminho == tmp_path / "audio.webm"
+    (_, download, _), (_, headers, opts) = ytdl_falso
+    assert not download and opts["proxy"] == "socks5://127.0.0.1:1081"  # o Range passa pelo proxy da saída
+    assert (
+        headers["Range"] == f"bytes=0-{int(36_000_000 * 900 / 3600 * 1.05)}" and headers["User-Agent"] == "ua"
+    )
+
+
+def test_faixa_curta_baixa_inteira(ytdl_falso, tmp_path):
+    from curator.audio.provedores.base import Candidato
+
+    c = Candidato(
+        "youtube_music", "https://music.youtube.com/watch?v=x", "Música", None, 240, 1.0, exato=True
+    )
+    a = YouTubeMusic("bestaudio").baixar(c, tmp_path, None)
+    assert not a.parcial and [ch[0] for ch in ytdl_falso] == ["extract_info"] and ytdl_falso[0][1]
 
 
 PAGINA_BANDCAMP = """

@@ -122,6 +122,13 @@ def test_duracao_divergente_descarta_candidato_de_busca(con, cfg):
     assert status(con, "a") == "sem-audio"
 
 
+def test_download_parcial_de_busca_nao_e_descartado_pela_duracao(con, cfg):
+    busca = ProvedorFalso("youtube_busca", ["ok"], score=0.95, exato=False, parcial=True)
+    w, _ = worker(con, cfg, [busca], AnalisadorFalso(duracao=400.0))  # só o começo de uma faixa longa
+    w.rodar(limite=1)
+    assert status(con, "a") == "ok"
+
+
 def test_erro_transitorio_agenda_nova_tentativa(con, cfg):
     yt = ProvedorFalso("youtube_music", ["erro"])
     rel_ = Relogio()

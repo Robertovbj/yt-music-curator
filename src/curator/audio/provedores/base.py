@@ -40,6 +40,7 @@ class Arquivo:
     caminho: Path
     bytes: int
     temporario: bool = True  # False para a pasta local: o worker nunca apaga
+    parcial: bool = False  # só o começo da faixa (faixas longas): a duração do arquivo não é a da faixa
 
 
 class ErroBloqueio(RuntimeError):

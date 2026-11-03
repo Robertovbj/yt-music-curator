@@ -306,7 +306,13 @@ class Worker:
             except Exception as e:
                 raise ErroAnalise(f"análise falhou: {e}") from e
             # o diretório temporário (e o áudio) somem ao sair do `with`, mesmo com exceção
-        if not melhor.exato and faixa.duracao_s and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia:
+        # um download parcial não tem a duração da faixa; o casamento já conferiu a duração do candidato
+        if (
+            not melhor.exato
+            and not arquivo.parcial
+            and faixa.duracao_s
+            and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia
+        ):
             raise ErroIndisponivel(
                 f"duração baixada {r.duracao_s:.0f}s ≠ esperada {faixa.duracao_s}s; candidato descartado"
             )
