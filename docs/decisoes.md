@@ -283,11 +283,14 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 3. **Pertencimento sobreposto:** uma música entra em todas as playlists sugeridas com que é parecida o bastante.
    - O HDBSCAN gera uma partição, que é só o ponto de partida. Cada cluster tem um núcleo (os membros com maior probabilidade) e um centroide.
    - Cada faixa entra em **todo cluster** em que `cos(t, centroide_c) ≥ τ_c`. O limiar τ_c é o **percentil 25 da similaridade dos membros do núcleo de c**. Cada cluster tem sua régua, não há uma régua global.
+   - *Revisado na implementação (2026-11-03):* com o percentil 25 do núcleo, um quarto do próprio núcleo ficava de fora e cada cluster cobria só metade do estilo. Agora os membros são a **partição do HDBSCAN mais** quem passa no limiar, e τ_c é o **percentil 10 da similaridade de todos os membros do HDBSCAN** ao centroide do núcleo. Ninguém sai do próprio cluster; a sobreposição só acrescenta.
    - Os pontos que o HDBSCAN marca como ruído também podem entrar em clusters por essa regra. O que sobrar continua "sem cluster".
    - A sobreposição entre os clusters *a* e *b* é medida por Jaccard. Se passar de ~0,6, as duas playlists provavelmente são uma só, e o sistema sugere fundi-las.
    - Alternativa registrada: os *soft membership vectors* do pacote `hdbscan`. A regra por centroide foi escolhida por ser mais simples de explicar e de auditar.
 4. **Descrição:** cada cluster recebe estatísticas agregadas: estilos dominantes (massa média do Discogs400), humor, BPM mediano, valência e excitação, e os artistas mais frequentes.
 5. **Nome:** a IA dá nome a cada cluster a partir **apenas dessas estatísticas**, com nomes em cache por `hash` do conteúdo do cluster.
+   - *Implementação (M5, antes do M4):* enquanto o MCP não existe, o nome é **automático e determinístico** (estilo dominante, o segundo só se tiver ao menos metade da força do primeiro, mais energia e humor: "Hard Rock · energia alta"). O cache é pelo hash do **núcleo**: um nome dado por você (`curator clusters renomear`) ou, depois, pela IA, sobrevive a reagrupamentos que mantenham o núcleo.
+   - Fusão e divisão ficam como **sugestões em texto**; só "criar" e "completar" viram operações de plano, porque não mexem no que você já organizou.
 6. **Saída:** um **plano** com playlists novas, fusões, divisões e movimentações. Cada faixa aparece em todas as playlists sugeridas a que pertence. Nada é aplicado sem confirmação (ADR-10).
 
 **Determinismo:** os mesmos dados e os mesmos parâmetros (incluindo `random_state`) dão os mesmos clusters. Quando entram faixas novas, os clusters existentes são mantidos como âncoras: as faixas novas são atribuídas por centroide, e o reclustering completo só acontece quando você pede. Assim, os nomes e o pertencimento não mudam o tempo todo.
@@ -436,6 +439,7 @@ Porte de `yt-classifier/teste.py` (modelos e `CUSTOM_GENRES` em `:44-80`, `Analy
 Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 
 - `curator visualizar` gera **um HTML autocontido**, que abre offline no navegador. A primeira opção é Plotly; deck.gl se o número de pontos pesar.
+  - *Implementação:* Plotly com o `plotly.min.js` embutido (~5 MB no total). O 2D usa WebGL (`scattergl`) e cai para SVG quando o navegador não tem WebGL; o 3D exige WebGL. Os 8 vizinhos de cada faixa vêm pré-calculados no arquivo, para as linhas ao clicar.
 - **Projeção UMAP 2D e 3D**, separada da UMAP de ~10-d usada no clustering, com `random_state` fixo. Fica em cache em `projecoes` e só é recalculada quando a biblioteca muda (`hash_biblioteca`).
 - **Cada ponto é uma música.** A cor pode ser trocada entre:
   - cluster sugerido (ADR-07);
