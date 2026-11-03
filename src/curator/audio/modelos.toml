@@ -1,0 +1,135 @@
+# Modelos Essentia usados pelo analisador (ADR-09). Gerado a partir dos arquivos oficiais em 2026-11-03.
+# Trocar um modelo muda o hash_modelos e marca as análises antigas para refazer.
+base_url = "https://essentia.upf.edu/models"
+
+[[modelo]]
+nome = "discogs-effnet-bs64-1"
+pasta = "feature-extractors/discogs-effnet"
+pb_sha256 = "3ed9af50d5367c0b9c795b294b00e7599e4943244f4cbd376869f3bfc87721b1"
+json_sha256 = "a35003202384735c33154e20264267f9941705218a7b93202b655a1d408d4ff6"
+
+[[modelo]]
+nome = "msd-musicnn-1"
+pasta = "feature-extractors/musicnn"
+pb_sha256 = "cdea0722bcee7f731286843f2233e3aa69887bb5c3e2dce011eff55f38d04f3e"
+json_sha256 = "8e6b3b509f0610c0e65dce467fd459d6777509388eaddb13ed138d8ac1341ffe"
+
+[[modelo]]
+nome = "approachability_2c-discogs-effnet-1"
+pasta = "classification-heads/approachability"
+pb_sha256 = "23be99c690c0740f5d3ce088f6159d9fcbffc98a8866388df71007a6f19a22df"
+json_sha256 = "580ebf7403ad26ffc72eb066a7801d3ed0088ce0e9aa3f50912d0ae7f173234e"
+
+[[modelo]]
+nome = "danceability-discogs-effnet-1"
+pasta = "classification-heads/danceability"
+pb_sha256 = "e1251f02cdc846445e2bc1fb3fe9963e32728c5c000e009188ae47c8963cb4c4"
+json_sha256 = "589e61dc05f0d7935be4b5fa7ab4341e5dc7cfecc6898f83503558564790cd75"
+
+[[modelo]]
+nome = "engagement_2c-discogs-effnet-1"
+pasta = "classification-heads/engagement"
+pb_sha256 = "905d8bea31cbd56b51eaf898152fec998a103b210a34b38abe1700ca0dfbe372"
+json_sha256 = "a10253b0c70236b514d234bdf28fcd60479da7c611266fa2490df64d06eecf83"
+
+[[modelo]]
+nome = "gender-discogs-effnet-1"
+pasta = "classification-heads/gender"
+pb_sha256 = "23f42f1f75b02907f7605509fe96b8419bf81663629e59000d003e55d851f154"
+json_sha256 = "fbb8a621c6f2d40d702f229e949952983d3c59fffe4b66f3cc7dded7a340c8be"
+
+[[modelo]]
+nome = "mood_acoustic-discogs-effnet-1"
+pasta = "classification-heads/mood_acoustic"
+pb_sha256 = "96a48d403f52fe9047214437fe396dd2f46699da765c911cd6dfbd456a20f733"
+json_sha256 = "45f61055d1d87d5e7f8a413b06b57eca20c3af1a23cf8912e0d916422e5207e1"
+
+[[modelo]]
+nome = "mood_aggressive-discogs-effnet-1"
+pasta = "classification-heads/mood_aggressive"
+pb_sha256 = "7705284e3a67f23f04d3f2fd75e18a82c0e70db8875b7b6f7061f2432de80858"
+json_sha256 = "81773e95d78db1b93283d73b2d06344d1ff79685b57d9428a40d47fdfcf537b8"
+
+[[modelo]]
+nome = "mood_electronic-discogs-effnet-1"
+pasta = "classification-heads/mood_electronic"
+pb_sha256 = "74cb244069c3803d86e6ee7c2817ecac46e37ac2759c457fa2f20d2132a8cb8b"
+json_sha256 = "150c21220b7f383868b60e495163498dbabfc4f73d4d1804f525ef352f2897b9"
+
+[[modelo]]
+nome = "mood_happy-discogs-effnet-1"
+pasta = "classification-heads/mood_happy"
+pb_sha256 = "de322aee7f4da29ecbd149c86e7964bd6fabe41ca85698a0be40a39d49e88633"
+json_sha256 = "ed4601bc396b23367d29cf45aa327366cdfdbd3e2baeb7a3f7893237f1ffd9e6"
+
+[[modelo]]
+nome = "mood_party-discogs-effnet-1"
+pasta = "classification-heads/mood_party"
+pb_sha256 = "bbd773a27002978179dd6fc5ffb75b7c41e6a7e412b5c5254d51a025e5b9373e"
+json_sha256 = "a7f15c6e05db7c3e9226646a87162ebb9cc00aea8bdbbc910aedafa7f4a8fdfb"
+
+[[modelo]]
+nome = "mood_relaxed-discogs-effnet-1"
+pasta = "classification-heads/mood_relaxed"
+pb_sha256 = "2c5aa6666b58fe80429a2dc677a135e9995922889b5a399af87d1c15f0ebb71d"
+json_sha256 = "86c0fe1c2c6d49bf08537bc2d3a602204feaede011ed119c1fc6c36270f60e6a"
+
+[[modelo]]
+nome = "mood_sad-discogs-effnet-1"
+pasta = "classification-heads/mood_sad"
+pb_sha256 = "4865cba49968b6ec295db3e8af6b4a7bb506b1a646628b9f07ee9910d52df82c"
+json_sha256 = "7f2c00099ad8255af33e43ab77d1ac2c86a1dd9f46d3e5ea2a9a52246f5033d9"
+
+[[modelo]]
+nome = "voice_instrumental-discogs-effnet-1"
+pasta = "classification-heads/voice_instrumental"
+pb_sha256 = "c8033548e17c292874265db62e82a051247768d10375a35a769e7bf695f16acf"
+json_sha256 = "43ac2c3b055dfaed20f6232e0f10636c287f1c5a6e5bd02c5585860031964c8f"
+
+[[modelo]]
+nome = "mtg_jamendo_genre-discogs-effnet-1"
+pasta = "classification-heads/mtg_jamendo_genre"
+pb_sha256 = "a46f94fd85b03b403d6498a820e3ee652e05a24fc2a344d84545ac36224e698e"
+json_sha256 = "b0ae89110ddbdba5ed3ad375910b1cffc738436fbb4138ac4c2801b48fc5ec59"
+
+[[modelo]]
+nome = "mtg_jamendo_instrument-discogs-effnet-1"
+pasta = "classification-heads/mtg_jamendo_instrument"
+pb_sha256 = "2e8c3003c722e098da371b6a1f7ad0ce62fac0dcfc09c7c7997d430941196c2a"
+json_sha256 = "7d02204c6451b5615e2968ec6364bbae3b915c886e608f05f00d3a38dc5177c4"
+
+[[modelo]]
+nome = "mtg_jamendo_moodtheme-discogs-effnet-1"
+pasta = "classification-heads/mtg_jamendo_moodtheme"
+pb_sha256 = "03f2b047020aee4ab39f8880da7bdae2a36d06a1508d656c6d424ad4d6de07a9"
+json_sha256 = "d62cd90263e4d613fa7fcce7a831e339450394794af63685f96e065c1a896ab0"
+
+[[modelo]]
+nome = "genre_discogs400-discogs-effnet-1"
+pasta = "classification-heads/genre_discogs400"
+pb_sha256 = "3885ba078a35249af94b8e5e4247689afac40deca4401a4bc888daf5a579c01c"
+json_sha256 = "2d367319d9b782ffa10f69abf0e805b3ac4e10899025e5bdbaceda3919b243e0"
+
+[[modelo]]
+nome = "emomusic-msd-musicnn-2"
+pasta = "classification-heads/emomusic"
+pb_sha256 = "fcfb486510213b35e0a691975325f58170f648ad4a02d749bce790da13ded43b"
+json_sha256 = "fe393417b709080582201f15624460882702d596b534344d00f7a256db87c5a8"
+
+[[modelo]]
+nome = "deam-msd-musicnn-2"
+pasta = "classification-heads/deam"
+pb_sha256 = "beb5eeb0909266eeb78b8d6bb1323b10829cf2fe55e3c01a13fa1846fa98b371"
+json_sha256 = "079df8d538d093ba35c34b7fbee01ff2773c4469be5281520f55d585295a3c58"
+
+[[modelo]]
+nome = "muse-msd-musicnn-2"
+pasta = "classification-heads/muse"
+pb_sha256 = "42b3f967bdb259a1c8c8fe1301b655e89f6d10be60f1dc7c34934a0de12f23f8"
+json_sha256 = "993983ac07cd2be8f1a01c8b2e6825567dd82851fc22261b5f1141025ff7e7ef"
+
+[[modelo]]
+nome = "deeptemp-k16-3"
+pasta = "tempo/tempocnn"
+pb_sha256 = "21c328332a221695dd6e8572728c617373064df882e8f81da6d88dc3a821e3b3"
+json_sha256 = "c0c62a52aa4a05f197208133906775c1e87077a520cdec53598b67ea9d625998"
