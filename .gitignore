@@ -1,0 +1,26 @@
+# ambiente
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# dados pessoais e credenciais (ficam em ~/.config e ~/.local/share, mas por garantia)
+*.db
+*.db-wal
+*.db-shm
+browser.json
+config.toml
+hierarquia.toml
+
+# modelos Essentia e áudio baixado
+models/
+*.pb
+*.opus
+*.webm
+*.m4a
+*.wav
+*.mp3
+
+# planejamento local (espelho do backlog do GitHub)
+planejamento/

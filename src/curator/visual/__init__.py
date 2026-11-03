@@ -1,0 +1,1 @@
+"""Visualizador gráfico da biblioteca."""
