@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "numpy>=2.3",
+    "pydantic>=2.11",
     "typer>=0.16",
     "ytmusicapi>=1.12,<2",
 ]
