@@ -100,3 +100,18 @@ Nomes de artistas, gêneros, features e playlists são conferidos com o banco; u
 uv run pytest
 uv run ruff check . && uv run ruff format .
 ```
+
+### Reorganização e mapa
+
+Requer o extra `organizar` (UMAP, scikit-learn, Plotly): `uv sync --extra analise --extra organizar`.
+
+```sh
+uv run curator reorganizar                 # clusters sobrepostos → criar, completar, fundir, dividir
+uv run curator reorganizar --reagrupar     # recalcula do zero (senão encaixa faixas novas nos clusters salvos)
+uv run curator reorganizar --mae "Rock - All" --plano
+uv run curator clusters mostrar            # estatísticas de cada cluster
+uv run curator clusters renomear 0 "Rock de estrada"
+uv run curator visualizar --abrir          # ~/.local/share/yt-music-curator/mapa.html, abre offline
+```
+
+O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável) e a vista de valência × excitação, com cores por cluster, playlist, gênero, quadrante, BPM ou "não alocada". Clicar numa faixa mostra as 8 mais parecidas.

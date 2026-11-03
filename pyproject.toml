@@ -18,6 +18,11 @@ analise = [
     "mutagen>=1.47",
     "yt-dlp[default]>=2026.10.26",  # inclui yt-dlp-ejs: resolve o desafio JS do YouTube (usa o deno do sistema)
 ]
+organizar = [
+    "plotly>=6.0",
+    "scikit-learn>=1.6",
+    "umap-learn>=0.5.7",
+]
 
 [project.scripts]
 curator = "curator.interfaces.cli:app"
@@ -49,4 +54,4 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 ignore = ["E501"]  # o formatador cuida do código; SQL e mensagens longas ficam como estão
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["typer.Option", "typer.Argument"]
+extend-immutable-calls = ["typer.Option", "typer.Argument", "curator.motor.clusters.Parametros"]  # Parametros é frozen
