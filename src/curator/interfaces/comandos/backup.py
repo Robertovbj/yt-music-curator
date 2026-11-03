@@ -56,3 +56,25 @@ def verificar(arquivo: Path = typer.Argument(..., exists=True, dir_okay=False)) 
     if problemas:
         falhar("problemas:\n  " + "\n  ".join(problemas))
     typer.echo("ok: todos os checksums conferem")
+
+
+@backup_app.command("restaurar")
+def restaurar(
+    arquivo: Path = typer.Argument(..., exists=True, dir_okay=False),
+    forcar: bool = typer.Option(
+        False, "--forcar", help="Restaura por cima, guardando os dados atuais renomeados."
+    ),
+) -> None:
+    """Extrai o backup em ~/.config/yt-music-curator e ~/.local/share/yt-music-curator."""
+    try:
+        r = backup.restaurar(arquivo, caminhos(), forcar)
+    except backup.BackupInvalido as e:
+        falhar(str(e))
+    for p in r.restaurados:
+        typer.echo(f"  restaurado: {p}")
+    for p in r.guardados:
+        typer.echo(f"  guardado:   {p}")
+    for a in r.avisos:
+        aviso(a)
+    typer.echo(f"pronto: {_resumo(r.manifesto)}")
+    typer.echo("confira com `uv run curator estatisticas`")

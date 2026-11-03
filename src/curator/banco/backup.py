@@ -18,6 +18,7 @@ import socket
 import sqlite3
 import tempfile
 import zipfile
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +42,14 @@ CONTAGENS = {
 
 class BackupInvalido(ValueError):
     pass
+
+
+@dataclass
+class Restauracao:
+    restaurados: list[str] = field(default_factory=list)
+    guardados: list[str] = field(default_factory=list)  # dados que existiam e foram renomeados
+    avisos: list[str] = field(default_factory=list)
+    manifesto: dict = field(default_factory=dict)
 
 
 def _sha256(caminho: Path) -> str:
@@ -137,3 +146,91 @@ def verificar(arquivo: Path) -> tuple[dict, list[str]]:
         if "dados/curator.db" not in manifesto.get("arquivos", {}):
             problemas.append("o backup não contém o banco")
     return manifesto, problemas
+
+
+def _guardar(p: Path, sufixo: str, r: Restauracao) -> None:
+    """Renomeia em vez de apagar (com o -wal/-shm do SQLite junto)."""
+    for alvo in (p, p.with_name(p.name + "-wal"), p.with_name(p.name + "-shm")):
+        if alvo.exists():
+            novo = alvo.with_name(alvo.name + sufixo)
+            alvo.rename(novo)
+            r.guardados.append(str(novo))
+
+
+def restaurar(arquivo: Path, c: Caminhos, forcar: bool = False) -> Restauracao:
+    from curator.banco.conexao import abrir, migracoes_do_pacote
+
+    manifesto, problemas = verificar(arquivo)
+    if problemas:
+        raise BackupInvalido("backup com problemas, nada foi alterado:\n  " + "\n  ".join(problemas))
+    ultimo = migracoes_do_pacote()[-1][0]
+    if manifesto["schema"] > ultimo:
+        raise BackupInvalido(
+            f"o backup é de um curator mais novo (schema {manifesto['schema']}, este conhece até {ultimo}): atualize o curator antes"
+        )
+    destinos = {"dados/curator.db": c.banco}
+    for nome in manifesto["arquivos"]:
+        if nome.startswith("config/"):
+            destinos[nome] = c.config_dir / nome.removeprefix("config/")
+    existentes = [str(p) for p in destinos.values() if p.exists()]
+    if existentes and not forcar:
+        raise BackupInvalido(
+            "já existem dados no destino (use --forcar para guardá-los e restaurar por cima):\n  "
+            + "\n  ".join(existentes)
+        )
+    if c.banco.exists():
+        from curator.audio.trava import OutroWorkerRodando, trava_worker
+
+        try:
+            with trava_worker(c.dados_dir / "worker.lock"):
+                pass
+        except OutroWorkerRodando as e:
+            raise BackupInvalido(f"{e}: pare o worker antes de restaurar por cima do banco") from e
+
+    r = Restauracao(manifesto=manifesto)
+    sufixo = ".antes-da-restauracao-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+    c.garantir()
+    with zipfile.ZipFile(arquivo) as z:
+        for nome, destino in destinos.items():
+            _guardar(destino, sufixo, r)
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            destino.write_bytes(z.read(nome))
+            if destino.name in CREDENCIAIS:
+                os.chmod(destino, 0o600)
+            r.restaurados.append(str(destino))
+
+    con = abrir(c.banco)  # aplica as migrações de um backup mais antigo
+    from curator.audio import fila
+
+    if n := fila.recuperar(con):
+        r.avisos.append(f"{n} faixa(s) que estavam sendo baixadas na origem voltaram para a fila")
+    depois = contagens(con)
+    if depois["analises_ok"] != manifesto["contagens"]["analises_ok"]:
+        r.avisos.append(
+            f"análises: {depois['analises_ok']} no banco restaurado, {manifesto['contagens']['analises_ok']} no manifesto"
+        )
+    con.close()
+    r.avisos += _o_que_falta(c, manifesto)
+    return r
+
+
+def _o_que_falta(c: Caminhos, manifesto: dict) -> list[str]:
+    from curator.audio import modelos
+
+    out = []
+    if modelos.verificar(c.modelos_dir):
+        out.append("modelos Essentia ausentes: `uv run curator modelos baixar`")
+    elif modelos.hash_modelos() != manifesto.get("hash_modelos"):
+        out.append("os modelos daqui são outros que os da origem: as análises antigas entram de novo na fila")
+    from importlib.util import find_spec
+
+    for modulo, extra in (("essentia", "analise"), ("umap", "organizar")):
+        if find_spec(modulo) is None:  # só confere; importar o essentia carregaria o TensorFlow à toa
+            out.append(f"extra `{extra}` não instalado: `uv sync --extra analise --extra organizar`")
+    if not (Path.home() / ".config/systemd/user/curator-analisar.timer").exists():
+        out.append("timer diário não instalado: veja contrib/systemd/")
+    if not manifesto.get("com_credenciais"):
+        out.append("o backup não tinha credenciais: rode `curator auth` nesta máquina")
+    elif "config/saidas.env" in manifesto["arquivos"]:
+        out.append("saidas.env restaurado: confira VPN_DIR e suba os containers de contrib/saidas/")
+    return out

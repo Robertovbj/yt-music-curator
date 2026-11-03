@@ -468,6 +468,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - As credenciais do ytmusicapi, as URLs de proxy com usuário e senha e as chaves opcionais (Spotify) ficam fora do repositório, em `~/.config/yt-music-curator/`.
 - Toda escrita no YouTube Music passa por um plano revisável, com log e status.
 - O áudio baixado nunca é persistido.
+- **Backup (M8):** `curator backup criar` gera um zip com o banco, copiado pela API de backup online do SQLite (consistente mesmo com o worker gravando), mais `config.toml`, `hierarquia.toml` e um manifesto com versões, contagens e SHA-256 de cada arquivo. Credenciais (`browser.json`, `saidas.env`) só entram com `--com-credenciais`, e aí o zip fica com permissão 600. `curator backup restaurar` confere tudo antes de tocar em qualquer coisa, recusa backups de schema mais novo, migra os mais antigos e nunca apaga: com `--forcar`, os dados atuais são renomeados para `*.antes-da-restauracao-<data>`. Também recusa restaurar por cima com o worker rodando.
 
 ---
 

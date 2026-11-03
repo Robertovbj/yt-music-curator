@@ -148,3 +148,14 @@ uv run curator hierarquia corrigir # plano que completa as agregadoras com o que
 ```
 
 Playlists criadas por plano são privadas. Planos acima de 200 faixas pedem `--grande`.
+
+### Backup e outro computador
+
+```sh
+uv run curator backup criar                       # ./yt-music-curator-AAAA-MM-DD.zip (pode rodar com o worker gravando)
+uv run curator backup criar --com-credenciais     # + browser.json e saidas.env (cookies e chave do Tailscale)
+uv run curator backup verificar arquivo.zip       # checksums e manifesto
+uv run curator backup restaurar arquivo.zip       # na máquina nova; com dados existentes, exige --forcar e os guarda renomeados
+```
+
+O zip leva o banco (análises, vetores, receitas, planos, clusters), o `config.toml` e o `hierarquia.toml`. Os modelos Essentia ficam de fora: na máquina nova, `uv run curator modelos baixar`.
