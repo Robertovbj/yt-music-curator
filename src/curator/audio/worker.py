@@ -21,7 +21,7 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from curator.audio import fila, proxies
@@ -37,6 +37,12 @@ from curator.audio.provedores.base import (
 )
 
 log = logging.getLogger(__name__)
+
+ESPERA_MAXIMA = timedelta(hours=26)  # no modo aguardar, nunca dorme mais que isso de uma vez
+
+
+class ErroAnalise(RuntimeError):
+    """O download funcionou, mas a análise falhou: a culpa não é da saída de rede."""
 
 
 @dataclass
@@ -156,6 +162,7 @@ class Worker:
         ate: datetime | None = None,
         ao_processar: Callable[[Progresso], None] | None = None,
         preparar: bool = True,
+        aguardar: bool = False,
     ) -> Relatorio:
         """`ao_processar` recebe um `Progresso` depois de cada faixa (a CLI imprime uma linha por faixa).
 
@@ -187,6 +194,8 @@ class Worker:
             resultado, usou_rede = self._processar(item)
             if resultado in ("sem_saida", "bloqueio"):
                 self.comp.devolver_vaga()  # não conta para o limite
+            if resultado == "sem_saida" and aguardar and self._aguardar_liberacao(ate):
+                continue
             if resultado == "sem_saida":
                 rel.motivo_parada = (
                     "todas as saídas em quarentena ou sem cota"
@@ -210,6 +219,17 @@ class Worker:
                 f = self.cfg["fila"]
                 self.dormir(self.rng.uniform(f["intervalo_min_s"], f["intervalo_max_s"]))
         return rel
+
+    def _aguardar_liberacao(self, ate: datetime | None) -> bool:
+        """Modo serviço: dorme até a saída sair da quarentena ou a cota virar. False = desistir (parada/limite)."""
+        agora = self.relogio()
+        libera = proxies.proxima_liberacao(self.con, agora, self.saida)
+        if libera is None or libera - agora > ESPERA_MAXIMA or (ate and libera >= ate):
+            return False
+        segundos = max((libera - agora).total_seconds(), 1) + self.rng.uniform(5, 60)
+        log.warning("saída %s indisponível; aguardando até %s", self.saida or "(todas)", libera.astimezone())
+        self.dormir(segundos)
+        return not self.parar
 
     # ------------------------------------------------------------------ uma faixa
 
@@ -240,7 +260,9 @@ class Worker:
                 status = None
             except Exception as e:
                 log.warning("%s: erro em %s (%s); nova tentativa mais tarde", faixa.titulo, nome, _resumir(e))
-                if saida:
+                if saida and isinstance(e, ErroAnalise):
+                    proxies.registrar_sucesso(self.con, saida.nome)  # o download deu certo
+                elif saida:
                     proxies.registrar_falha(self.con, saida.nome, self.cfg, self.relogio())
                 fila.falhar(self.con, vid, type(e).__name__, str(e), self.cfg, self.relogio(), self.rng)
                 fila.marcar(self.con, vid, "erro", provedores_tentados=tentados)
@@ -277,7 +299,12 @@ class Worker:
             if saida:
                 proxies.registrar_uso(self.con, saida.nome, self.relogio())
             fila.marcar(self.con, faixa.video_id, "analisando")
-            r = self.analisador.analisar(arquivo.caminho)
+            try:
+                r = self.analisador.analisar(arquivo.caminho)
+            except AudioInvalido:
+                raise
+            except Exception as e:
+                raise ErroAnalise(f"análise falhou: {e}") from e
             # o diretório temporário (e o áudio) somem ao sair do `with`, mesmo com exceção
         if not melhor.exato and faixa.duracao_s and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia:
             raise ErroIndisponivel(
@@ -334,6 +361,7 @@ def rodar_em_paralelo(
     ate: datetime | None = None,
     ao_processar: Callable[[Progresso], None] | None = None,
     compartilhado: Compartilhado | None = None,
+    aguardar: bool = False,
     **kw,
 ) -> Relatorio:
     """Um worker por saída ativa (direta + proxies do config), em threads, dividindo limite e parada."""
@@ -354,7 +382,7 @@ def rodar_em_paralelo(
         c = abrir(caminho_banco)
         try:
             w = Worker(c, cfg, an, montar_provedores(cfg, c), saida=nome, compartilhado=comp, **kw)
-            r = w.rodar(ate=ate, ao_processar=ao_processar, preparar=False)
+            r = w.rodar(ate=ate, ao_processar=ao_processar, preparar=False, aguardar=aguardar)
         except Exception:
             log.exception("worker da saída %s parou com erro", nome)
             r = Relatorio(motivo_parada=f"erro na saída {nome}")

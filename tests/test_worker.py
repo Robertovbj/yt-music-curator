@@ -269,3 +269,47 @@ def test_paralelo_bloqueio_numa_saida_nao_para_as_outras(con, cfg):
     assert (
         con.execute("SELECT quarentena_ate IS NOT NULL FROM proxies WHERE nome = 'direta'").fetchone()[0] == 1
     )
+
+
+def test_erro_de_analise_nao_poe_a_saida_em_quarentena(con, cfg):
+    class AnalisadorQuebrado(AnalisadorFalso):
+        def analisar(self, caminho):
+            raise RuntimeError(
+                "In RhythmExtractor2013.compute: Descriptor name 'internal.bpm' of type Real not found"
+            )
+
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", [])], AnalisadorQuebrado())
+    rel = w.rodar()
+    assert rel.contagem == {"erro": 7}
+    p = con.execute(
+        "SELECT falhas, falhas_seguidas, quarentena_ate FROM proxies WHERE nome = 'direta'"
+    ).fetchone()
+    assert tuple(p) == (0, 0, None)  # 7 erros de análise e nenhuma falha atribuída à rede
+    assert (
+        con.execute("SELECT tipo_erro FROM fila_download WHERE video_id = 'a'").fetchone()[0] == "ErroAnalise"
+    )
+
+
+def test_aguardar_dorme_ate_a_quarentena_acabar_e_continua(con, cfg):
+    from curator.audio import proxies
+
+    relogio = Relogio()
+    esperas = []
+
+    def dormir(s):  # o tempo "passa" enquanto o worker dorme
+        esperas.append(s)
+        relogio.t += timedelta(seconds=s)
+
+    yt = ProvedorFalso("youtube_music", ["bloqueio"])
+    w = Worker(con, cfg, AnalisadorFalso(), {"youtube_music": yt}, relogio=relogio, dormir=dormir)
+    rel = w.rodar(limite=2, aguardar=True)
+    assert rel.contagem == {"bloqueio": 1, "ok": 2}
+    fim_quarentena = T0 + timedelta(hours=cfg["disjuntor"]["quarentena_inicial_h"])
+    assert relogio.t >= fim_quarentena  # dormiu até a quarentena acabar (somando a pausa normal)
+    assert max(esperas) > 3600  # e foi uma espera longa, não só a pausa entre downloads
+    assert proxies.escolher(con, relogio.t) is not None
+
+
+def test_sem_aguardar_continua_parando(con, cfg):
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["bloqueio"])])
+    assert w.rodar().motivo_parada == "todas as saídas em quarentena ou sem cota"

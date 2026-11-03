@@ -111,12 +111,13 @@ def estado(con: sqlite3.Connection, agora: datetime) -> list[dict]:
     ]
 
 
-def proxima_liberacao(con: sqlite3.Connection, agora: datetime) -> datetime | None:
-    """Quando alguma saída volta a ficar disponível (fim de quarentena ou virada do dia para a cota)."""
+def proxima_liberacao(con: sqlite3.Connection, agora: datetime, nome: str | None = None) -> datetime | None:
+    """Quando alguma saída (ou a saída `nome`) volta a ficar disponível: fim da quarentena ou virada do dia."""
     fins = [
         datetime.fromisoformat(r[0])
         for r in con.execute(
-            "SELECT quarentena_ate FROM proxies WHERE ativo = 1 AND quarentena_ate > ?", (_iso(agora),)
+            "SELECT quarentena_ate FROM proxies WHERE ativo = 1 AND quarentena_ate > ? AND (? IS NULL OR nome = ?)",
+            (_iso(agora), nome, nome),
         )
     ]
     local = agora.astimezone()

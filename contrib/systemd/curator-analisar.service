@@ -12,7 +12,7 @@ Type=exec
 WorkingDirectory=%h/Projects/Pessoal/yt-music-curator
 # mise (uv) + /usr/bin (ffmpeg, ffprobe, deno)
 Environment=PATH=%h/.local/share/mise/shims:/usr/local/bin:/usr/bin
-ExecStart=%h/.local/share/mise/shims/uv run --extra analise curator -v analisar
+ExecStart=%h/.local/share/mise/shims/uv run --extra analise curator -v analisar --aguardar
 # SIGTERM: o worker termina a faixa atual e para; nada fica "baixando" na fila
 KillSignal=SIGTERM
 TimeoutStopSec=180
