@@ -1,0 +1,76 @@
+[
+  {
+    "pedido": "Quero uma playlist para dirigir, músicas que me deem vontade de sair fazendo drift",
+    "fluxo": "Receita por perfil: energia, agressividade e excitação altas, BPM de corrida. Rótulos conferidos com descrever_vocabulario (o Discogs400 não tem 'Phonk').",
+    "receita": {
+      "nome": "Drift",
+      "tamanho": 50,
+      "filtros": {"bpm": [110, 175], "min": {"energy": 0.55}},
+      "perfil_alvo": {
+        "energy": {"alvo": 0.9, "peso": 2},
+        "aggressive": {"alvo": 0.7, "peso": 1.5},
+        "arousal": {"alvo": 0.8, "peso": 1},
+        "danceability": {"alvo": 0.6, "peso": 0.5}
+      },
+      "generos_preferidos": {
+        "Electronic---Drum n Bass": 1,
+        "Electronic---Hardstyle": 1,
+        "Electronic---Industrial": 1,
+        "Rock---Industrial": 0.8,
+        "Hip Hop---Trap": 0.6,
+        "energetic": 1
+      },
+      "diversidade": {"lambda": 0.7, "max_por_artista": 3}
+    }
+  },
+  {
+    "pedido": "Quero uma playlist de rap",
+    "fluxo": "Filtro duro pelo gênero-pai; o executor ordena pela própria probabilidade do gênero.",
+    "receita": {
+      "nome": "Rap",
+      "tamanho": 80,
+      "filtros": {"genero_pai_min": {"Hip Hop": 0.3}},
+      "diversidade": {"lambda": 0.85, "max_por_artista": 4}
+    }
+  },
+  {
+    "pedido": "Quero uma playlist de rock geral, e uma playlist com meus subgêneros centrais de rock",
+    "fluxo": "Rock geral: receita pelo gênero-pai. Subgêneros centrais: sugerir_reorganizacao(mae='Rock - All') — os clusters dentro do rock são os subgêneros que a sua biblioteca realmente tem; renomear_cluster com nomes bons; se já houver filhas, o plano completa as existentes em vez de duplicar.",
+    "receita": {
+      "nome": "Rock geral",
+      "tamanho": 150,
+      "filtros": {"genero_pai_min": {"Rock": 0.3}},
+      "diversidade": {"lambda": 0.9, "max_por_artista": 5}
+    }
+  },
+  {
+    "pedido": "Veja todas minhas músicas curtidas que ainda não estão em uma playlist, e me diga onde colocar",
+    "fluxo": "classificar_nao_alocadas() e mostrar destino por faixa; as 'sem destino' parecidas entre si sugerem uma playlist nova (ofereça sugerir_reorganizacao). Só criar_plano_da_classificacao se o usuário aprovar."
+  },
+  {
+    "pedido": "Veja todas as minhas músicas. Sugira playlists para eu poder organizar melhor",
+    "fluxo": "sugerir_reorganizacao(); dê nomes melhores aos clusters com renomear_cluster a partir das estatísticas (estilos, humor, BPM, artistas); explique criar/completar/fundir/dividir; criar_plano_da_reorganizacao só se aprovado."
+  },
+  {
+    "pedido": "Quero uma playlist de músicas para dormir, mas não inclua nenhuma da Hoyoverse",
+    "fluxo": "Primeiro buscar_artistas('hoyo') e buscar_albuns('genshin'), ('star rail'), ('zenless'), ('honkai') para pôr os nomes REAIS nas exclusões; depois a receita calma.",
+    "receita": {
+      "nome": "Dormir",
+      "tamanho": 40,
+      "filtros": {
+        "excluir_artistas": ["HOYO-MiX"],
+        "excluir_albuns_contendo": ["Genshin", "Honkai", "Star Rail", "Zenless"],
+        "bpm": [50, 105],
+        "max": {"aggressive": 0.2, "party": 0.3}
+      },
+      "perfil_alvo": {
+        "relaxed": {"alvo": 0.9, "peso": 2},
+        "arousal": {"alvo": 0.15, "peso": 2},
+        "energy": {"alvo": 0.1, "peso": 1.5},
+        "acousticness": {"alvo": 0.7, "peso": 0.5}
+      },
+      "generos_preferidos": {"Electronic---Ambient": 1, "calm": 1, "relaxing": 1},
+      "diversidade": {"lambda": 0.75, "max_por_artista": 3}
+    }
+  }
+]

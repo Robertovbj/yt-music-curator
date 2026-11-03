@@ -115,3 +115,28 @@ uv run curator visualizar --abrir          # ~/.local/share/yt-music-curator/map
 ```
 
 O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável) e a vista de valência × excitação, com cores por cluster, playlist, gênero, quadrante, BPM ou "não alocada". Clicar numa faixa mostra as 8 mais parecidas.
+
+### Claude via MCP
+
+O servidor MCP deixa o Claude montar receitas, classificar e sugerir reorganizações conversando com você. Ele nunca aplica nada: no máximo cria planos.
+
+```sh
+claude mcp add yt-music-curator -- uv --directory ~/Projects/Pessoal/yt-music-curator run --extra organizar curator mcp
+```
+
+No Claude Desktop, o equivalente em `claude_desktop_config.json`:
+
+```json
+{"mcpServers": {"yt-music-curator": {"command": "uv", "args": ["--directory", "/home/USUARIO/Projects/Pessoal/yt-music-curator", "run", "--extra", "organizar", "curator", "mcp"]}}}
+```
+
+### Aplicar planos no YouTube Music
+
+```sh
+uv run curator plano mostrar 3     # o diff
+uv run curator plano aplicar 3     # pede confirmação; recusa se a playlist mudou no YT depois do plano
+uv run curator plano desfazer 3    # volta ao estado de antes e apaga as playlists que o plano criou
+uv run curator hierarquia corrigir # plano que completa as agregadoras com o que está nas filhas
+```
+
+Playlists criadas por plano são privadas. Planos acima de 200 faixas pedem `--grande`.

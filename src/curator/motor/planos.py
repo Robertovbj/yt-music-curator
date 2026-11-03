@@ -23,10 +23,53 @@ class Operacao:
     motivo: dict[str, str] = field(default_factory=dict)  # video_id → explicação curta
 
 
-def criar(con: sqlite3.Connection, origem: str, ops: list[Operacao]) -> int:
+def _agregadoras_acima(con: sqlite3.Connection, pid: str) -> list[str]:
+    """Mães (e avós…) do tipo agregadora: precisam conter tudo o que entra nas filhas (ADR-03)."""
+    out = []
+    atual = con.execute("SELECT mae_id FROM playlists WHERE playlist_id = ?", (pid,)).fetchone()
+    while atual and atual[0]:
+        mae = con.execute(
+            "SELECT playlist_id, tipo, mae_id FROM playlists WHERE playlist_id = ?", (atual[0],)
+        ).fetchone()
+        if mae is None:
+            break
+        if mae["tipo"] == "agregadora":
+            out.append(mae["playlist_id"])
+        atual = (mae["mae_id"],)
+    return out
+
+
+def _propagar(con: sqlite3.Connection, ops: list[Operacao]) -> list[Operacao]:
+    """Para cada faixa adicionada numa filha, adiciona também nas agregadoras acima dela (#43)."""
+    extra: dict[str, Operacao] = {}
+    destinos = {o.playlist for o in ops if o.tipo == "adicionar"}
+    for o in ops:
+        if o.tipo != "adicionar" or o.playlist.startswith("nova:"):
+            continue
+        for mae in _agregadoras_acima(con, o.playlist):
+            alvo = (
+                next((x for x in ops if x.tipo == "adicionar" and x.playlist == mae), None)
+                if mae in destinos
+                else None
+            )
+            alvo = alvo or extra.setdefault(mae, Operacao("adicionar", mae))
+            for v in o.video_ids:
+                if v not in alvo.video_ids:
+                    alvo.video_ids.append(v)
+                    alvo.motivo[v] = "agregadora: contém tudo o que está nas filhas"
+    return ops + list(extra.values())
+
+
+def criar(
+    con: sqlite3.Connection, origem: str, ops: list[Operacao], propagar_agregadoras: bool = True
+) -> int:
+    """Guarda o plano. Registra o retrato (snapshot_hash) de cada playlist existente afetada, para a aplicação
+    recusar o plano se a playlist mudar no YT depois disso (#44)."""
     ops = [o for o in ops if o.tipo in ("criar", "renomear") or o.video_ids]
     if not ops:
         raise ValueError("plano vazio: nenhuma alteração")
+    if propagar_agregadoras:
+        ops = _propagar(con, ops)
     # não adiciona o que a playlist já tem
     for o in ops:
         if o.tipo == "adicionar" and not o.playlist.startswith("nova:"):
@@ -40,11 +83,30 @@ def criar(con: sqlite3.Connection, origem: str, ops: list[Operacao]) -> int:
     ops = [o for o in ops if o.tipo in ("criar", "renomear") or o.video_ids]
     if not ops:
         raise ValueError("plano vazio: as faixas já estão nas playlists")
+    afetadas = sorted({o.playlist for o in ops if not o.playlist.startswith("nova:")})
+    snapshots = {
+        pid: h
+        for pid, h in con.execute(
+            f"SELECT playlist_id, snapshot_hash FROM playlists WHERE playlist_id IN ({','.join('?' * len(afetadas))})",
+            afetadas,
+        )
+    } if afetadas else {}  # fmt: skip
     cur = con.execute(
-        "INSERT INTO planos (origem, diff, criado_em) VALUES (?, ?, ?)",
-        (origem, json.dumps([asdict(o) for o in ops], ensure_ascii=False), agora()),
+        "INSERT INTO planos (origem, diff, snapshots, criado_em) VALUES (?, ?, ?, ?)",
+        (origem, json.dumps([asdict(o) for o in ops], ensure_ascii=False), json.dumps(snapshots), agora()),
     )
     return cur.lastrowid
+
+
+def de_agregadoras(con: sqlite3.Connection) -> int:
+    """Plano que faz cada agregadora conter todas as faixas das descendentes (#43)."""
+    from curator.banco.hierarquia import faltantes_nas_agregadoras
+
+    ops = [
+        Operacao("adicionar", mae, ids, motivo=dict.fromkeys(ids, "está numa filha e falta na agregadora"))
+        for mae, ids in faltantes_nas_agregadoras(con).items()
+    ]
+    return criar(con, "agregadoras", ops, propagar_agregadoras=False)
 
 
 def obter(con: sqlite3.Connection, plano_id: int) -> tuple[dict, list[Operacao]] | None:
@@ -104,3 +166,34 @@ def diff_legivel(con: sqlite3.Connection, ops: list[Operacao]) -> str:
                 motivo = f"  ({o.motivo[v]})" if v in o.motivo else ""
                 linhas.append(f"  {sinal} {nomes.get(v, v)}{motivo}")
     return "\n".join(linhas)
+
+
+# ------------------------------------------------------------------ planos a partir do motor (CLI e MCP)
+
+
+def de_receita(
+    con: sqlite3.Connection, nome: str, ids: list[str], scores: dict[str, float], destino: str | None = None
+) -> int:
+    """Plano com o resultado de uma receita: cria uma playlist nova com o nome da receita, ou completa `destino`."""
+    alvo = destino or f"nova:{nome}"
+    ops = [] if destino else [Operacao("criar", alvo, titulo=nome)]
+    ops.append(
+        Operacao(
+            "adicionar", alvo, ids, motivo={v: f"receita {nome}, score {scores.get(v, 0):.3f}" for v in ids}
+        )
+    )
+    return criar(con, f"receita:{nome}", ops)
+
+
+def de_classificacao(con: sqlite3.Connection, decisoes) -> int:
+    por: dict[str, Operacao] = {}
+    for d in decisoes:
+        for x in d.destinos:
+            op = por.setdefault(x.playlist_id, Operacao("adicionar", x.playlist_id))
+            op.video_ids.append(d.video_id)
+            op.motivo[d.video_id] = f"score {x.score:.2f} ≥ limiar {x.limiar:.2f}"
+    return criar(con, "classificar", list(por.values()))
+
+
+def de_reorganizacao(con: sqlite3.Connection, sugestoes, escopo: str) -> int:
+    return criar(con, f"reorganizar:{escopo}", [o for s in sugestoes for o in s.operacoes])

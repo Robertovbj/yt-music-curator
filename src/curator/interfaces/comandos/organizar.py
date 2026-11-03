@@ -52,18 +52,14 @@ def reorganizar(
     con = banco()
     escopo = _escopo(con, mae)
     p = clusters.Parametros(min_cluster_size=min_cluster)
-    aid = clusters.ultimo(con, escopo)
-    if aid is None or reagrupar:
+    if reagrupar or clusters.ultimo(con, escopo) is None:
         typer.echo("agrupando (UMAP + HDBSCAN)…", err=True)
-        try:
-            cs = clusters.calcular(con, escopo, p)
-        except clusters.PoucasFaixas as e:
-            falhar(str(e))
-        aid = clusters.salvar(con, cs, escopo, p)
-    else:
-        if n := clusters.atualizar(con, aid):
-            typer.echo(f"{n} faixa(s) nova(s) encaixada(s) nos clusters #{aid}", err=True)
-        cs = clusters.carregar(con, aid)
+    try:
+        aid, cs, novos = clusters.obter(con, escopo, p, reagrupar)
+    except clusters.PoucasFaixas as e:
+        falhar(str(e))
+    if novos:
+        typer.echo(f"{novos} faixa(s) nova(s) encaixada(s) nos clusters #{aid}", err=True)
     typer.echo(f"agrupamento #{aid}: {len(cs)} cluster(s)")
     for c in cs:
         typer.echo(f"  [{c.cluster_id}] {c.nome} — {len(c.membros)} faixa(s)")
@@ -73,11 +69,9 @@ def reorganizar(
     for s in sugestoes:
         typer.echo(f"  {s.tipo:<9} {s.texto}")
     if plano:
-        ops = [o for s in sugestoes for o in s.operacoes]
         try:
-            typer.echo(
-                f"\nplano #{planos.criar(con, f'reorganizar:{escopo}', ops)} criado; veja com `curator plano mostrar`"
-            )
+            pid = planos.de_reorganizacao(con, sugestoes, escopo)
+            typer.echo(f"\nplano #{pid} criado; veja com `curator plano mostrar`")
         except ValueError as e:
             aviso(str(e))
 

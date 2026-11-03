@@ -119,6 +119,44 @@ def sincronizar_curtidas(con: sqlite3.Connection, cli: ClienteYT) -> Resumo:
 # ------------------------------------------------------------------ playlists
 
 
+def gravar_playlist(
+    con: sqlite3.Connection, pid: str, titulo: str, tracks: list[dict], total: int | None
+) -> tuple[int, int]:
+    """Reescreve o pertencimento de uma playlist própria (sincronização total). Devolve (faixas, sem video_id)."""
+    sem = 0
+    with transacao(con):
+        itens = []
+        for t in tracks:
+            vid = gravar_faixa(con, t)
+            if vid is None:
+                sem += 1
+                continue
+            itens.append((vid, t.get("setVideoId")))
+        ids = [vid for vid, _ in itens]
+        con.execute(
+            """INSERT INTO playlists (playlist_id, titulo, propria, total, snapshot_hash, sincronizada_em)
+               VALUES (?, ?, 1, ?, ?, ?)
+               ON CONFLICT (playlist_id) DO UPDATE SET titulo = excluded.titulo, propria = 1,
+                 total = excluded.total, snapshot_hash = excluded.snapshot_hash,
+                 sincronizada_em = excluded.sincronizada_em""",
+            (pid, titulo, total if total is not None else len(ids), _hash(ids), agora()),
+        )
+        con.execute("DELETE FROM playlist_faixas WHERE playlist_id = ?", (pid,))
+        con.executemany(
+            "INSERT INTO playlist_faixas (playlist_id, posicao, video_id, set_video_id) VALUES (?, ?, ?, ?)",
+            [(pid, i, vid, svid) for i, (vid, svid) in enumerate(itens, start=1)],
+        )
+    return len(itens), sem
+
+
+def sincronizar_uma(con: sqlite3.Connection, cli: ClienteYT, pid: str) -> list[tuple[str, str | None]]:
+    """Baixa e regrava uma playlist própria agora (usado depois de aplicar um plano). Devolve [(video_id, setVideoId)]."""
+    detalhe = cli.chamar("get_playlist", pid, limit=None)
+    tracks = detalhe.get("tracks") or []
+    gravar_playlist(con, pid, detalhe.get("title") or pid, tracks, _contagem(detalhe.get("trackCount")))
+    return [(t["videoId"], t.get("setVideoId")) for t in tracks if t.get("videoId")]
+
+
 def _contagem(valor) -> int | None:
     if isinstance(valor, int):
         return valor
@@ -183,31 +221,11 @@ def sincronizar_playlists(
             continue
 
         vistas.add(pid)
-        with transacao(con):
-            itens = []
-            for t in detalhe.get("tracks") or []:
-                vid = gravar_faixa(con, t)
-                if vid is None:
-                    r.conta("sem_video_id")
-                    continue
-                itens.append((vid, t.get("setVideoId")))
-            ids = [vid for vid, _ in itens]
-            hash_novo = _hash(ids)
-            con.execute(
-                """INSERT INTO playlists (playlist_id, titulo, propria, total, snapshot_hash, sincronizada_em)
-                   VALUES (?, ?, 1, ?, ?, ?)
-                   ON CONFLICT (playlist_id) DO UPDATE SET titulo = excluded.titulo, propria = 1,
-                     total = excluded.total, snapshot_hash = excluded.snapshot_hash,
-                     sincronizada_em = excluded.sincronizada_em""",
-                (pid, titulo, total_listado if total_listado is not None else len(ids), hash_novo, agora()),
-            )
-            con.execute("DELETE FROM playlist_faixas WHERE playlist_id = ?", (pid,))
-            con.executemany(
-                "INSERT INTO playlist_faixas (playlist_id, posicao, video_id, set_video_id) VALUES (?, ?, ?, ?)",
-                [(pid, i, vid, svid) for i, (vid, svid) in enumerate(itens, start=1)],
-            )
+        n, sem = gravar_playlist(con, pid, titulo, detalhe.get("tracks") or [], total_listado)
+        if sem:
+            r.conta("sem_video_id", sem)
         r.conta("baixadas")
-        log.info("playlist %s: %d faixas", titulo, len(itens))
+        log.info("playlist %s: %d faixas", titulo, n)
 
     # Playlists próprias que sumiram da biblioteca foram apagadas no YT.
     sumidas = con.execute(

@@ -5,6 +5,7 @@ description = "Organiza a biblioteca do YouTube Music com features de áudio (Es
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "mcp>=1.12",
     "numpy>=2.3",
     "pydantic>=2.11",
     "typer>=0.16",

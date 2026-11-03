@@ -18,6 +18,9 @@ PADRAO: dict = {
         "ttl_dias": 30,
         "intervalo_s": 0.7,  # pausa entre chamadas ao ytmusicapi
     },
+    "planos": {
+        "limite_faixas": 200,  # acima disso, `plano aplicar` exige --grande além da confirmação
+    },
     "playlists": {
         "ttl_h": 24,  # playlist com a mesma contagem e sincronizada há menos que isso não é rebaixada
     },

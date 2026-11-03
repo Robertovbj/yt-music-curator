@@ -310,3 +310,14 @@ def renomear(
         "UPDATE clusters SET nome = ?, nome_origem = ? WHERE agrupamento_id = ? AND cluster_id = ?",
         (nome, origem, agrupamento_id, cluster_id),
     )
+
+
+def obter(con: sqlite3.Connection, escopo: str = "biblioteca", p: Parametros = Parametros(),
+          reagrupar: bool = False) -> tuple[int, list[Cluster], int]:  # fmt: skip
+    """(agrupamento_id, clusters, faixas novas encaixadas): reaproveita o último agrupamento, salvo `reagrupar`."""
+    aid = ultimo(con, escopo)
+    if aid is None or reagrupar:
+        cs = calcular(con, escopo, p)
+        return salvar(con, cs, escopo, p), cs, 0
+    novos = atualizar(con, aid)
+    return aid, carregar(con, aid), novos
