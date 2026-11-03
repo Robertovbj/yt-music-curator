@@ -1,0 +1,20 @@
+# Lote diário de download + análise. Instalação (usuário, sem root):
+#   cp contrib/systemd/curator-analisar.* ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now curator-analisar.timer
+# Logs: journalctl --user -u curator-analisar
+[Unit]
+Description=yt-music-curator: lote diário de análise de áudio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/Projects/Pessoal/yt-music-curator
+# mise (uv) + /usr/bin (ffmpeg, ffprobe, deno)
+Environment=PATH=%h/.local/share/mise/shims:/usr/local/bin:/usr/bin
+ExecStart=%h/.local/share/mise/shims/uv run --extra analise curator -v analisar --ate 07:00
+# SIGTERM: o worker termina a faixa atual e para; nada fica "baixando" na fila
+KillSignal=SIGTERM
+TimeoutStopSec=180
+Nice=10
+IOSchedulingClass=idle

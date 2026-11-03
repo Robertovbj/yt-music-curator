@@ -299,11 +299,13 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 ### 8.1 Configuração do yt-dlp
 
 - **Formato:** o áudio de **menor bitrate** aceitável (`bestaudio[abr<=70]/worstaudio`, normalmente opus 249/250). Os modelos reamostram para 16 kHz (EffNet/MusiCNN), 11,025 kHz (TempoCNN) e 44,1 kHz (ritmo/tom), então a perda de qualidade é irrelevante para a análise e o tráfego cai bastante.
-- **Sem conversão para WAV:** o `MonoLoader` do Essentia lê opus/m4a direto via ffmpeg.
+- **Sem conversão para WAV:** o áudio é decodificado pelo `ffmpeg` do sistema direto para a memória (pipe), sem arquivo intermediário.
+  - *Revisado na implementação (2026-11-03):* o `MonoLoader` do essentia-tensorflow 2.1b6 **não** abre opus/webm ("Unsupported codec"). Por isso o ffmpeg decodifica na taxa e nos canais nativos, e a reamostragem continua com o `Resample` do Essentia (ver ADR-09).
 - O áudio vai para um diretório temporário e é **apagado logo após a análise**.
 - **Divisão de tráfego:** os metadados vêm do ytmusicapi (barato, uma chamada por página). O yt-dlp é chamado **só para o áudio, uma vez por faixa e para sempre**, por causa do cache por versão do analisador (ADR-02).
 - **Conta separada do download:** o ytmusicapi, que é autenticado na sua conta, sai sempre do IP de casa. O yt-dlp **não** usa cookies da conta principal, para não ligar um bloqueio por volume à sua conta. Se cookies forem necessários, usar uma conta secundária.
 - yt-dlp sempre atualizado: o YouTube muda o player com frequência. Quando o YouTube exigir PO token, usar um plugin provedor de PO token (por exemplo, `bgutil-ytdlp-pot-provider`).
+- **Desafio JavaScript do YouTube:** o yt-dlp atual precisa de um runtime JS (Deno, já instalado no sistema) e do script solucionador `yt-dlp-ejs`. A dependência é `yt-dlp[default]`, que traz o script local, sem baixá-lo em tempo de execução. Sem ele, o piloto teve "n challenge solving failed" e um HTTP 403; com ele, nenhum dos dois.
 
 ### 8.2 Ritmo e fila
 
@@ -359,7 +361,19 @@ dias para a análise inicial ≈ faixas na biblioteca ÷ (cota diária × saída
 ex.: 3.000 faixas ÷ (250/dia × 2 saídas) ≈ 6 dias
 ```
 
-Depois da carga inicial, só as faixas novas entram na fila. O tempo do Essentia na CPU também limita a vazão. Ele ainda não foi medido; a fase 2 do roteiro mede.
+Depois da carga inicial, só as faixas novas entram na fila.
+
+**Números reais (piloto de 2026-11-03, 8 faixas, só a conexão direta):**
+
+| Medida | Valor |
+|---|---|
+| Biblioteca | 3417 faixas (2657 curtidas únicas + faixas só em playlists), 218 h de áudio |
+| Download por faixa (opus ~66 kbps) | 1,4–2,5 MB, 2–8 s |
+| Análise Essentia por faixa de ~3 min (CPU, 8 núcleos) | ~5–6 s; pico de ~2,1 GB de RAM |
+| Download + análise | 11–20 s por faixa (média 14–18 s) |
+| Bloqueios | nenhum em 8 downloads |
+
+Com a cota inicial de 200/dia e só a saída direta: 3410 ÷ 200 ≈ **18 dias** para a carga inicial. O gargalo é a cota, não a CPU: no ritmo de pausas de 20–60 s, a máquina daria conta de ~1500 faixas/dia. Próximo passo: um lote de 50 (critério da #22) e, sem bloqueios, subir a cota para 300 ou acrescentar uma saída.
 
 **Alternativas registradas e rejeitadas:** analisar só um trecho (60–90 s) e usar as prévias de 30 s do Deezer/iTunes. As duas reduziriam muito o risco de bloqueio, mas foram descartadas porque você quer a análise da faixa inteira. Ficam como plano B se o bloqueio persistir.
 
@@ -368,6 +382,9 @@ Depois da carga inicial, só as faixas novas entram na fila. O tempo do Essentia
 Porte de `yt-classifier/teste.py` (modelos e `CUSTOM_GENRES` em `:44-80`, `Analyzer` em `:126-311`), com estas mudanças:
 
 - **Decodificar uma vez** e reamostrar para 16 kHz, 11,025 kHz e 44,1 kHz, em vez de decodificar três vezes.
+  - *Revisado na implementação:* a decodificação é do ffmpeg (ver ADR-08.1), mas a **reamostragem é do Essentia** (`Resample`, qualidade 4 para 16/11 kHz e 1 para 44,1 kHz, como o `MonoLoader` do protótipo). Os modelos são sensíveis ao reamostrador: com o do ffmpeg, `happy` variou 0,14 na mesma faixa.
+  - A **mixagem para mono é a média dos canais.** O `-ac 1` do ffmpeg soma com ganho √2 (+3 dB, picos acima de 1,0), o que deslocava várias saídas. Há um teste de regressão para isso.
+  - **Validação:** na mesma faixa, o analisador novo e o `teste.py` diferem no máximo 0,0003 (arredondamento do protótipo), com o mesmo tom, BPM e top-3 do Discogs400. Duas execuções seguidas dão resultados idênticos, byte a byte.
 - **Guardar tudo:** os embeddings EffNet e MusiCNN (média temporal; opcionalmente também desvio-padrão) e **todos os vetores de probabilidade**, não só o top-k.
 - **Separar logs de dados:** progresso no stderr ou no `logging`, nunca no stdout.
 - **Modelos:** num caminho absoluto configurável (`~/.local/share/yt-music-curator/models`), com um manifesto (`modelos.toml`) que lista **todos** os modelos, URLs e **checksums SHA-256**. Os `.pb` deixam de ser versionados no git. `hash_modelos` vem do manifesto.
@@ -467,8 +484,8 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 
 - **Viés dos modelos:** os modelos de gênero do Essentia têm viés para o catálogo ocidental. J-Rock, kawaii metal e OSTs de jogos podem receber rótulos estranhos. Mitigações: o embedding e o kNN dependem menos dos rótulos; considerar enriquecer com tags do Last.fm (API gratuita) num ADR futuro.
 - **Mudanças no YouTube:** o yt-dlp pode quebrar ou passar a exigir PO token, e a fila precisa aguentar parar por dias.
-- **Tamanho da biblioteca:** ainda não foi medido. Ele define a cota, o número de saídas e se o brute-force continua suficiente.
-- **Custo do Essentia na CPU:** ainda não foi medido. Se for alto, considerar processos em paralelo no worker ou GPU (hoje o `CUDA_VISIBLE_DEVICES=-1` está fixo no código).
+- **Tamanho da biblioteca:** medido em 3417 faixas (218 h). O brute-force em numpy sobra (ADR-02); a cota define os ~18 dias da carga inicial (ADR-08.5).
+- **Custo do Essentia na CPU:** medido em ~5–6 s por faixa de 3 min e ~2,1 GB de RAM. Não é o gargalo (a cota é), então paralelismo e GPU ficam fora por enquanto.
 - **Playlists com poucos membros:** o kNN fica frágil, e por isso há o fallback descritivo do ADR-06.
 - **Hierarquia com mais de uma mãe:** hoje é uma árvore (uma mãe só). Se precisar de DAG, troca-se `mae_id` por uma tabela de arestas.
 
