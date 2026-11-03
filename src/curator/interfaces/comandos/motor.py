@@ -121,19 +121,10 @@ def receita_executar(
     if ex.sem_analise:
         aviso(f"{ex.sem_analise} faixa(s) do universo ainda sem análise ficaram de fora")
     if plano_nova or plano_em:
-        alvo = f"nova:{nome}" if plano_nova else _playlist(con, plano_em)
-        ops = ([planos.Operacao("criar", alvo, titulo=nome)] if plano_nova else []) + [
-            planos.Operacao(
-                "adicionar",
-                alvo,
-                ex.ids,
-                motivo={i.video_id: f"receita {nome}, score {i.score:.3f}" for i in ex.itens},
-            )
-        ]
+        destino = None if plano_nova else _playlist(con, plano_em)
         try:
-            typer.echo(
-                f"plano #{planos.criar(con, f'receita:{nome}', ops)} criado; veja com `curator plano mostrar`"
-            )
+            pid = planos.de_receita(con, nome, ex.ids, {i.video_id: i.score for i in ex.itens}, destino)
+            typer.echo(f"plano #{pid} criado; veja com `curator plano mostrar`")
         except ValueError as e:
             aviso(str(e))
 
@@ -185,14 +176,8 @@ def classificar(
     for titulo, n in c.frias:
         aviso(f"'{titulo}' tem só {n} membro(s) analisado(s); ficou de fora (mínimo {cl.MIN_MEMBROS})")
     if plano:
-        por = {}
-        for d in c.decisoes:
-            for x in d.destinos:
-                op = por.setdefault(x.playlist_id, planos.Operacao("adicionar", x.playlist_id))
-                op.video_ids.append(d.video_id)
-                op.motivo[d.video_id] = f"score {x.score:.2f} ≥ limiar {x.limiar:.2f}"
         try:
-            typer.echo(f"plano #{planos.criar(con, 'classificar', list(por.values()))} criado")
+            typer.echo(f"plano #{planos.de_classificacao(con, c.decisoes)} criado")
         except ValueError as e:
             aviso(str(e))
 

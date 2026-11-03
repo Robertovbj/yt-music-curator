@@ -104,3 +104,34 @@ def diff_legivel(con: sqlite3.Connection, ops: list[Operacao]) -> str:
                 motivo = f"  ({o.motivo[v]})" if v in o.motivo else ""
                 linhas.append(f"  {sinal} {nomes.get(v, v)}{motivo}")
     return "\n".join(linhas)
+
+
+# ------------------------------------------------------------------ planos a partir do motor (CLI e MCP)
+
+
+def de_receita(
+    con: sqlite3.Connection, nome: str, ids: list[str], scores: dict[str, float], destino: str | None = None
+) -> int:
+    """Plano com o resultado de uma receita: cria uma playlist nova com o nome da receita, ou completa `destino`."""
+    alvo = destino or f"nova:{nome}"
+    ops = [] if destino else [Operacao("criar", alvo, titulo=nome)]
+    ops.append(
+        Operacao(
+            "adicionar", alvo, ids, motivo={v: f"receita {nome}, score {scores.get(v, 0):.3f}" for v in ids}
+        )
+    )
+    return criar(con, f"receita:{nome}", ops)
+
+
+def de_classificacao(con: sqlite3.Connection, decisoes) -> int:
+    por: dict[str, Operacao] = {}
+    for d in decisoes:
+        for x in d.destinos:
+            op = por.setdefault(x.playlist_id, Operacao("adicionar", x.playlist_id))
+            op.video_ids.append(d.video_id)
+            op.motivo[d.video_id] = f"score {x.score:.2f} ≥ limiar {x.limiar:.2f}"
+    return criar(con, "classificar", list(por.values()))
+
+
+def de_reorganizacao(con: sqlite3.Connection, sugestoes, escopo: str) -> int:
+    return criar(con, f"reorganizar:{escopo}", [o for s in sugestoes for o in s.operacoes])
