@@ -39,6 +39,27 @@ def analisar(
         from curator.audio.analisador import Analisador
     except ImportError:
         falhar("o worker precisa do extra de análise: `uv sync --extra analise`")
+    from curator.audio.trava import OutroWorkerRodando, trava_worker
+
+    try:
+        with trava_worker(caminhos().dados_dir / "worker.lock"):
+            rel = _rodar_worker(Analisador, limite, ate)
+    except OutroWorkerRodando as e:
+        typer.echo(f"{e}; nada a fazer.")  # código 0: o timer não registra falha
+        return
+
+    partes = (
+        ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in sorted(rel.contagem.items())) or "nada processado"
+    )
+    typer.echo(f"{partes} · parada: {rel.motivo_parada}")
+    if rel.segundos_por_faixa:
+        media = sum(rel.segundos_por_faixa) / len(rel.segundos_por_faixa)
+        typer.echo(f"tempo médio por faixa analisada: {media:.1f} s (download + análise)")
+    if rel.proxima_liberacao:
+        typer.echo(f"próxima saída disponível: {rel.proxima_liberacao.astimezone():%d/%m %H:%M}")
+
+
+def _rodar_worker(Analisador, limite: int | None, ate: str | None):  # noqa: N803
     from curator.audio import provedores
     from curator.audio.worker import Worker
 
@@ -52,21 +73,11 @@ def analisar(
         falhar(str(e))
     worker = Worker(con, cfg, analisador, provedores.montar(cfg, con))
     worker.instalar_sinais()
-    rel = worker.rodar(
+    return worker.rodar(
         limite=limite,
         ate=_horario(ate) if ate else None,
         ao_processar=lambda p: typer.echo(p.linha(), err=True),
     )
-
-    partes = (
-        ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in sorted(rel.contagem.items())) or "nada processado"
-    )
-    typer.echo(f"{partes} · parada: {rel.motivo_parada}")
-    if rel.segundos_por_faixa:
-        media = sum(rel.segundos_por_faixa) / len(rel.segundos_por_faixa)
-        typer.echo(f"tempo médio por faixa analisada: {media:.1f} s (download + análise)")
-    if rel.proxima_liberacao:
-        typer.echo(f"próxima saída disponível: {rel.proxima_liberacao.astimezone():%d/%m %H:%M}")
 
 
 @fila_app.command("status")
