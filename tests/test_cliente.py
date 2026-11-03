@@ -22,6 +22,18 @@ def test_configurar_grava_json_privado(tmp_path):
     assert "SAPISID" in dados["cookie"]
 
 
+def test_configurar_descarta_linha_de_requisicao_e_transporte(tmp_path):
+    """Cópia "bruta" do Firefox: vem com a linha POST e com Content-Encoding: gzip."""
+    bruto = "POST /youtubei/v1/browse?prettyPrint=false HTTP/2\nHost: music.youtube.com\n"
+    bruto += "Content-Encoding: gzip\nContent-Length: 1774\nTE: trailers\nPriority: u=4\n" + HEADERS
+    destino = tmp_path / "browser.json"
+    configurar(bruto, destino)
+    chaves = set(json.loads(destino.read_text()))
+    assert not chaves & {"content-encoding", "content-length", "te", "priority", "host"}
+    assert not any(k.startswith("POST") for k in chaves)
+    assert {"cookie", "x-goog-authuser"} <= chaves
+
+
 def test_configurar_rejeita_headers_sem_cookie(tmp_path):
     with pytest.raises(Exception, match="cookie"):
         configurar("accept: */*\n", tmp_path / "browser.json")

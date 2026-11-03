@@ -1,7 +1,9 @@
 """Credenciais do YouTube Music (headers do navegador) e cliente ytmusicapi com ritmo e novas tentativas."""
 
+import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -16,12 +18,36 @@ class CredencialAusente(RuntimeError):
     pass
 
 
+# Headers de transporte que o navegador manda e quebram a requisição do ytmusicapi
+# (com "content-encoding: gzip" o servidor tenta descomprimir um corpo que vai em texto puro).
+TRANSPORTE = {
+    "content-encoding",
+    "content-length",
+    "te",
+    "priority",
+    "alt-used",
+    "connection",
+    "pragma",
+    "cache-control",
+}
+
+
+def _limpar(headers: dict) -> dict:
+    """Tira headers de transporte e a linha de requisição ("POST /... HTTP/2") colada junto."""
+    return {
+        k: v
+        for k, v in headers.items()
+        if k.lower() not in TRANSPORTE and not re.match(r"^(GET|POST|PUT|HEAD|OPTIONS) /", k, re.IGNORECASE)
+    }
+
+
 def configurar(headers_raw: str, destino: Path) -> None:
     """Valida os headers e grava o `browser.json` com permissão 600."""
     destino.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = destino.with_suffix(".tmp")
     setup(filepath=str(tmp), headers_raw=headers_raw)
     os.chmod(tmp, 0o600)
+    tmp.write_text(json.dumps(_limpar(json.loads(tmp.read_text())), ensure_ascii=True, indent=2))
     tmp.replace(destino)
 
 
