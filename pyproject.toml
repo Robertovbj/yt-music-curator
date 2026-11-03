@@ -14,7 +14,8 @@ dependencies = [
 # Pesado (~850 MB com o TensorFlow embutido): só para o worker de análise.
 analise = [
     "essentia-tensorflow==2.1b6.dev1438",
-    "yt-dlp>=2026.10.26",
+    "mutagen>=1.47",
+    "yt-dlp[default]>=2026.10.26",  # inclui yt-dlp-ejs: resolve o desafio JS do YouTube (usa o deno do sistema)
 ]
 
 [project.scripts]
