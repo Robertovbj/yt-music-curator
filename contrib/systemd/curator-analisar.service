@@ -1,4 +1,4 @@
-# Lote diário de download + análise. Instalação (usuário, sem root):
+# Lote diário de download + análise: roda até esgotar a cota do dia ([fila] cota_diaria). Instalação (usuário, sem root):
 #   cp contrib/systemd/curator-analisar.* ~/.config/systemd/user/
 #   systemctl --user daemon-reload && systemctl --user enable --now curator-analisar.timer
 # Logs: journalctl --user -u curator-analisar
@@ -12,7 +12,7 @@ Type=exec
 WorkingDirectory=%h/Projects/Pessoal/yt-music-curator
 # mise (uv) + /usr/bin (ffmpeg, ffprobe, deno)
 Environment=PATH=%h/.local/share/mise/shims:/usr/local/bin:/usr/bin
-ExecStart=%h/.local/share/mise/shims/uv run --extra analise curator -v analisar --ate 07:00
+ExecStart=%h/.local/share/mise/shims/uv run --extra analise curator -v analisar
 # SIGTERM: o worker termina a faixa atual e para; nada fica "baixando" na fila
 KillSignal=SIGTERM
 TimeoutStopSec=180
