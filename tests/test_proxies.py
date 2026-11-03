@@ -82,3 +82,19 @@ def test_proxima_liberacao(con, cfg):
     assert proxies.proxima_liberacao(con, T0) == T0 + timedelta(
         hours=cfg["disjuntor"]["quarentena_inicial_h"]
     )
+
+
+def test_cota_vira_no_dia_local_e_nao_em_utc(con, cfg, monkeypatch):
+    monkeypatch.setenv("TZ", "America/Sao_Paulo")
+    import time
+
+    time.tzset()
+    try:
+        noite = datetime(2026, 11, 4, 0, 30, tzinfo=UTC)  # 21:30 de 03/11 em São Paulo
+        for _ in range(2):
+            proxies.registrar_uso(con, "direta", T0)  # 09:00 de 03/11 em São Paulo
+        assert proxies.escolher(con, noite).nome == "vps"  # direta já gastou a cota do dia 03 local
+        assert proxies.proxima_liberacao(con, noite) == datetime(2026, 11, 4, 3, 0, tzinfo=UTC)  # 00:00 local
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
