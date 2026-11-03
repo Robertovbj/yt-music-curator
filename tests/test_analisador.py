@@ -63,3 +63,19 @@ def test_analisador_completo_e_deterministico(tmp_path):
     assert all(np.array_equal(r1.vetores[k], r2.vetores[k]) for k in r1.vetores)
     assert len(r1.rotulos["discogs400"]) == 400
     assert 0 <= r1.features["valence"] <= 1 and 0 <= r1.features["energy"] <= 1
+
+
+@precisa_ffmpeg
+def test_faixa_longa_e_cortada_na_analise_mas_registra_a_duracao_total(tmp_path, monkeypatch):
+    pytest.importorskip("essentia")
+    pasta = Path.home() / ".local/share/yt-music-curator/models"
+    from curator.audio import analisador, modelos
+
+    if modelos.verificar(pasta):
+        pytest.skip("modelos não instalados")
+    monkeypatch.setattr(analisador, "DURACAO_MAXIMA_S", 8)
+    a = analisador.Analisador(pasta, verificar_checksums=False)
+    r = a.analisar(_tom_estereo(tmp_path / "t.webm", segundos=14))
+    assert r.duracao_s == pytest.approx(14, abs=0.2) and r.duracao_analisada_s == 8
+    # várias faixas seguidas na mesma instância (o RhythmExtractor agora é novo a cada uma)
+    assert a.analisar(_tom_estereo(tmp_path / "u.webm", segundos=10)).features["bpm"] >= 0  # sem exceção
