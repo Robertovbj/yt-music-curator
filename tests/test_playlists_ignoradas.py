@@ -64,7 +64,7 @@ def test_receita_nao_usa_nem_referencia(con):
 def test_classificacao_nao_enxerga(con):
     ps, _ = cl.perfis(con)
     assert "PLjogo" not in ps and TAMBEM_NO_ROCK in ps["PLrock"].membros
-    c = cl.classificar(con, ids=["ambient00", "rock11"])
+    c = cl.classificar(con, ids=["ambient00", "rock11"], em=["PLrock", "PLrap"])
     assert [d.video_id for d in c.decisoes] == ["rock11"]
 
 

@@ -81,4 +81,6 @@ def test_cli_receita_classificar_e_plano(con, tmp_path):
     assert r.exit_code == 1 and "quis dizer: Banda Rock" in r.output
 
     r = run(app, ["classificar", "--plano"])
+    assert r.exit_code == 1 and "diga em quais playlists" in r.output  # sem alvo, nada
+    r = run(app, ["classificar", "--em", "Calma", "--plano"])
     assert r.exit_code == 0 and "com destino" in r.output

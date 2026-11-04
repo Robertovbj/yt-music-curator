@@ -82,6 +82,19 @@ def nao_alocadas(con: sqlite3.Connection) -> list[str]:
     )
 
 
+def fora_das_gerais(con: sqlite3.Connection) -> list[str]:
+    """Curtidas (sem dislike nem lista negra) que não estão em nenhuma playlist geral (#80), da mais recente para
+    a mais antiga. As outras playlists não contam: as gerais ignoram o que já existe."""
+    return _ids(
+        con,
+        f"""SELECT f.video_id FROM faixas f WHERE f.curtida = 1 AND f.avaliacao != 'dislike'
+            AND f.video_id NOT IN ({IGNORADAS}) AND NOT EXISTS (
+               SELECT 1 FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
+               WHERE p.geral = 1 AND p.ignorada = 0 AND pf.video_id = f.video_id)
+           ORDER BY f.posicao_curtida""",
+    )
+
+
 def exclusivas_da_mae(con: sqlite3.Connection, mae: str) -> list[str]:
     """Na mãe e em nenhuma das filhas diretas (o conceito do yt-music-helper)."""
     return _ids(

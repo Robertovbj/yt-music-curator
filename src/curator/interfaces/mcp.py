@@ -45,8 +45,14 @@ RECOMENDAÇÕES (músicas que o usuário ainda não curtiu; veja exemplos_de_rec
 - Recomendações NUNCA entram nas playlists das curtidas: criar_plano_da_recomendacao cria uma playlist nova;
   playlist_destino + permitir_novas só quando o usuário pediu isso com todas as letras.
 - O histórico (historico_recomendacoes) mostra o que já foi sugerido e o que virou curtida ou dislike.
-Outros pedidos: "onde colocar as não alocadas" → classificar_nao_alocadas; "sugira playlists / reorganize" →
-sugerir_reorganizacao (dê nomes melhores com renomear_cluster). Faixas ainda não analisadas ficam de fora de tudo
+PLAYLISTS EXISTENTES do usuário seguem a lógica dele (uma por jogo, por artista...): NUNCA as use como gabarito
+e NUNCA sugira mexer numa delas sem ele nomear qual. Por isso:
+- "onde colocar as não alocadas" → classificar_nao_alocadas SÓ com as playlists que ele nomeou (playlists=[...]
+  ou mae=...), ou nas_gerais=True se ele falar das gerais. Se ele não disse quais, PERGUNTE.
+- "sugira playlists" / "organize minhas curtidas" sem citar playlist → sugerir_playlists_gerais (clusters de todas
+  as curtidas, ignorando as playlists que existem; o plano só cria playlists novas). Dê nomes melhores com
+  renomear_cluster(gerais=True) a partir das estatísticas, antes de criar_plano_das_gerais.
+- "reorganize a playlist X" → sugerir_reorganizacao(mae=X). Faixas ainda não analisadas ficam de fora de tudo
 (o worker analisa ~500 por dia); diga isso quando 'sem_analise' for grande.
 Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1; gêneros são probabilidades (0,3 já é forte no Discogs400).
 """
@@ -266,10 +272,19 @@ def salvar_receita(receita: dict[str, Any], pedido: str | None = None) -> dict:
     return {"nome": r.nome, "hash": r.hash()}
 
 
-def classificar_nao_alocadas(mae: str | None = None, limite: int = 60) -> dict:
-    """Onde colocar as curtidas não alocadas (kNN + centroide, limiar por playlist). `mae` restringe às filhas dela."""
+def classificar_nao_alocadas(
+    playlists: list[str] | None = None, mae: str | None = None, nas_gerais: bool = False, limite: int = 60
+) -> dict:
+    """Em quais das playlists NOMEADAS pelo usuário colocar curtidas (kNN + centroide, limiar por playlist).
+
+    Exige um alvo: `playlists` (ids ou títulos), `mae` (as filhas dela) ou `nas_gerais` (as playlists gerais).
+    Com playlists/mae, as curtidas não alocadas; com nas_gerais, as curtidas que ainda não estão em nenhuma geral."""
     con = banco()
-    c = cl.classificar(con, mae=_escopo(con, mae) if mae else None)
+    try:
+        c = cl.classificar(con, mae=_escopo(con, mae) if mae else None,
+                           em=[_escopo(con, x) for x in playlists or []], nas_gerais=nas_gerais)  # fmt: skip
+    except (cl.SemAlvo, ValueError) as e:
+        return {"erros": [str(e)]}
     meta = _faixas(con, [d.video_id for d in c.decisoes[:limite]])
     return {
         "com_destino": sum(1 for d in c.decisoes if d.destinos),
@@ -288,12 +303,55 @@ def classificar_nao_alocadas(mae: str | None = None, limite: int = 60) -> dict:
     }
 
 
-def sugerir_reorganizacao(mae: str | None = None, reagrupar: bool = False) -> dict:
-    """Clusters sobrepostos da biblioteca (ou de uma mãe) e sugestões de criar, completar, fundir e dividir playlists."""
+def sugerir_playlists_gerais(reagrupar: bool = False, min_cluster: int | None = None) -> dict:
+    """Playlists gerais a partir de TODAS as curtidas, ignorando as playlists existentes (clusters sobrepostos).
+
+    `min_cluster` menor dá mais playlists (padrão 40). Dê nomes com renomear_cluster(gerais=True) antes do plano."""
+    from curator.motor import clusters, gerais
+
+    con = banco()
+    try:
+        aid, cs, novos = gerais.obter(con, gerais.parametros(min_cluster), reagrupar)
+    except clusters.PoucasFaixas as e:
+        return {"erros": [str(e)]}
+    return {
+        "agrupamento": aid,
+        "faixas_novas_encaixadas": novos,
+        "curtidas": len(clusters._universo(con, clusters.CURTIDAS)),
+        "cobertas": len({v for c in cs for v in c.membros}),
+        "playlists": [
+            {
+                "cluster_id": c.cluster_id,
+                "nome": c.nome,
+                "faixas": len(c.membros),
+                "estatisticas": c.estatisticas,
+            }
+            for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id))
+        ],
+    }
+
+
+def criar_plano_das_gerais(min_cluster: int | None = None) -> dict:
+    """Plano (não aplicado) que CRIA as playlists gerais do último agrupamento. Não toca nenhuma playlist existente."""
+    from curator.motor import clusters, gerais
+
+    con = banco()
+    try:
+        aid, cs, _ = gerais.obter(con, gerais.parametros(min_cluster))
+        return mostrar_plano(gerais.plano(con, aid, cs))
+    except (clusters.PoucasFaixas, ValueError) as e:
+        return {"erros": [str(e)]}
+
+
+def sugerir_reorganizacao(mae: str, reagrupar: bool = False) -> dict:
+    """Dentro da playlist `mae` que o usuário nomeou: clusters e sugestões de criar, completar, fundir e dividir."""
     from curator.motor import clusters, reorganizar
 
     con = banco()
-    escopo = _escopo(con, mae)
+    try:
+        escopo = _escopo(con, mae)
+    except ValueError as e:
+        return {"erros": [str(e)]}
     try:
         aid, cs, novos = clusters.obter(con, escopo, clusters.Parametros(), reagrupar)
     except clusters.PoucasFaixas as e:
@@ -315,14 +373,16 @@ def sugerir_reorganizacao(mae: str | None = None, reagrupar: bool = False) -> di
     }
 
 
-def renomear_cluster(cluster_id: int, nome: str, mae: str | None = None) -> dict:
-    """Dá um nome melhor a um cluster (a partir das estatísticas). O nome sobrevive a reagrupamentos com o mesmo núcleo."""
+def renomear_cluster(cluster_id: int, nome: str, mae: str | None = None, gerais: bool = False) -> dict:
+    """Dá um nome melhor a um cluster (a partir das estatísticas). O nome sobrevive a reagrupamentos com o mesmo núcleo.
+
+    `gerais=True` para os clusters de sugerir_playlists_gerais; `mae` para os de sugerir_reorganizacao."""
     from curator.motor import clusters
 
     con = banco()
-    aid = clusters.ultimo(con, _escopo(con, mae))
+    aid = clusters.ultimo(con, clusters.CURTIDAS if gerais else _escopo(con, mae))
     if aid is None:
-        return {"erros": ["nenhum agrupamento ainda; rode sugerir_reorganizacao"]}
+        return {"erros": ["nenhum agrupamento ainda; rode sugerir_playlists_gerais ou sugerir_reorganizacao"]}
     clusters.renomear(con, aid, cluster_id, nome, origem="ia")
     return {"agrupamento": aid, "cluster_id": cluster_id, "nome": nome}
 
@@ -342,17 +402,20 @@ def criar_plano_da_receita(nome_receita: str, playlist_destino: str | None = Non
     return mostrar_plano(pid)
 
 
-def criar_plano_da_classificacao(mae: str | None = None) -> dict:
-    """Plano (não aplicado) adicionando as não alocadas às playlists sugeridas por classificar_nao_alocadas."""
+def criar_plano_da_classificacao(
+    playlists: list[str] | None = None, mae: str | None = None, nas_gerais: bool = False
+) -> dict:
+    """Plano (não aplicado) com as sugestões de classificar_nao_alocadas, com os MESMOS alvos nomeados."""
     con = banco()
-    c = cl.classificar(con, mae=_escopo(con, mae) if mae else None)
     try:
+        c = cl.classificar(con, mae=_escopo(con, mae) if mae else None,
+                           em=[_escopo(con, x) for x in playlists or []], nas_gerais=nas_gerais)  # fmt: skip
         return mostrar_plano(planos.de_classificacao(con, c.decisoes))
-    except ValueError as e:
+    except (cl.SemAlvo, ValueError) as e:
         return {"erros": [str(e)]}
 
 
-def criar_plano_da_reorganizacao(mae: str | None = None) -> dict:
+def criar_plano_da_reorganizacao(mae: str) -> dict:
     """Plano (não aplicado) com as sugestões de criar e completar do último agrupamento."""
     from curator.motor import clusters, reorganizar
 
@@ -561,7 +624,7 @@ def faltantes_nas_agregadoras() -> dict:
 FERRAMENTAS = [
     arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
-    sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
+    sugerir_playlists_gerais, criar_plano_das_gerais, sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
     criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,
     recomendar_novas, recomendar_misturando_curtidas, concluir_recomendacao, mostrar_recomendacao,
     historico_recomendacoes, criar_plano_da_recomendacao,

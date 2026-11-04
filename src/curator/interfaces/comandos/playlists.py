@@ -86,3 +86,49 @@ def ignoradas() -> None:
     for pid, titulo in linhas:
         typer.echo(f"  {titulo} ({_efeito(con, pid)})")
     typer.echo(f"{len(consultas.ignoradas(con))} vídeo(s) na lista negra")
+
+
+@playlists_app.command("sugerir")
+def sugerir(
+    reagrupar: bool = typer.Option(
+        False, "--reagrupar", help="Recalcula do zero (senão reaproveita o último)."
+    ),
+    min_cluster: int | None = typer.Option(
+        None,
+        "--min-cluster",
+        help="Tamanho mínimo de cada playlist geral (padrão 40; menor = mais playlists).",
+    ),
+    plano: bool = typer.Option(False, "--plano", help="Gera um plano que cria as playlists gerais."),
+) -> None:
+    """Playlists gerais a partir de TODAS as curtidas, ignorando as playlists que existem (#80).
+
+    Só a matemática do projeto (clusters sobrepostos): o plano só cria playlists novas e não toca nas suas.
+    Depois de aplicado, `curator classificar --nas-gerais` encaixa nelas as curtidas novas."""
+    from curator.interfaces.comandos.organizar import _modulos
+
+    clusters, _ = _modulos()
+    from curator.motor import gerais
+
+    con = banco()
+    typer.echo("agrupando as curtidas (UMAP + HDBSCAN)…", err=True)
+    try:
+        aid, cs, novos = gerais.obter(con, gerais.parametros(min_cluster), reagrupar)
+    except clusters.PoucasFaixas as e:
+        falhar(str(e))
+    if novos:
+        typer.echo(f"{novos} curtida(s) nova(s) encaixada(s) nos clusters #{aid}", err=True)
+    cobertas = {v for c in cs for v in c.membros}
+    total = len(clusters._universo(con, clusters.CURTIDAS))
+    typer.echo(
+        f"agrupamento #{aid}: {len(cs)} playlist(s) geral(is), cobrindo {len(cobertas)} de {total} curtidas"
+    )
+    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
+        typer.echo(f"  [{c.cluster_id}] {c.nome} — {len(c.membros)} faixa(s)")
+    typer.echo('renomeie antes do plano com `curator clusters renomear N "nome" --gerais`', err=True)
+    if plano:
+        try:
+            typer.echo(
+                f"\nplano #{gerais.plano(con, aid, cs)} criado (só playlists novas); veja com `curator plano mostrar`"
+            )
+        except ValueError as e:
+            falhar(str(e))

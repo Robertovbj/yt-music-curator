@@ -6,6 +6,10 @@ O limiar τₚ de cada playlist sai de leave-one-out sobre os próprios membros 
 eles recebem quando retirados), então playlists "fechadas" exigem mais semelhança que as "abertas".
 Decisão de cima para baixo: a faixa só é comparada com as filhas das mães em que passou. Multi-rótulo:
 entra em toda playlist em que s ≥ τ.
+
+Só nas playlists que o usuário nomeia (#80): `em` (playlists), `mae` (as filhas dela) ou `nas_gerais` (as
+criadas por `curator playlists sugerir`). Sem alvo, nada é sugerido: as playlists existentes não são mexidas sem
+pedido.
 """
 
 import sqlite3
@@ -19,6 +23,10 @@ from curator.motor import espacos
 
 K, ALFA, PERCENTIL, MIN_MEMBROS = 10, 0.6, 10, 5
 MARGEM_AMBIGUA = 0.02
+
+
+class SemAlvo(ValueError):
+    """Classificar exige dizer em quais playlists (#80)."""
 
 
 @dataclass
@@ -165,18 +173,45 @@ def decidir(
     return Decisao(video_id, sorted(destinos, key=lambda d: (-d.score, d.playlist_id)), proximas, ambigua)
 
 
+def alvos(con: sqlite3.Connection, mae: str | None = None, em: list[str] | None = None,
+          nas_gerais: bool = False) -> list[str]:  # fmt: skip
+    """As playlists que a classificação pode sugerir, na ordem do pedido e sem repetir. Levanta `SemAlvo`."""
+    from curator.motor import gerais
+
+    out = list(em or [])
+    if mae:
+        out += _raizes(con, mae)
+    if nas_gerais:
+        if not (g := gerais.playlists(con)):
+            raise SemAlvo(
+                "nenhuma playlist geral ainda: rode `curator playlists sugerir --plano` e aplique o plano"
+            )
+        out += g
+    if not out:
+        raise SemAlvo("diga em quais playlists: --em (uma ou mais), --mae (as filhas dela) ou --nas-gerais")
+    return list(dict.fromkeys(out))
+
+
 def classificar(con: sqlite3.Connection, ids: list[str] | None = None, mae: str | None = None,
-                k: int = K, alfa: float = ALFA, percentil: float = PERCENTIL) -> Classificacao:  # fmt: skip
-    """Por padrão, as curtidas não alocadas. Faixas sem análise ficam de fora (e são contadas)."""
-    ids = consultas.nao_alocadas(con) if ids is None else ids
+                k: int = K, alfa: float = ALFA, percentil: float = PERCENTIL, em: list[str] | None = None,
+                nas_gerais: bool = False) -> Classificacao:  # fmt: skip
+    """Entre os `alvos` pedidos. Por padrão, as curtidas não alocadas; só com `nas_gerais`, as curtidas que ainda
+    não estão em nenhuma geral (as outras playlists não contam). Faixas sem análise ficam de fora (e são contadas)."""
+    raizes = alvos(con, mae, em, nas_gerais)
+    if ids is None:
+        ids = (
+            consultas.fora_das_gerais(con) if nas_gerais and not (em or mae) else consultas.nao_alocadas(con)
+        )
     bloqueadas = consultas.bloqueadas(con)
     ids = [v for v in ids if v not in bloqueadas]
     emb = espacos.embeddings(con)
     com = [v for v in ids if v in emb.indice]
     ps, frias = perfis(con, k, alfa, percentil)
-    raizes = _raizes(con, mae)
     decisoes = [decidir(emb.linha(v), v, ps, raizes, k, alfa) for v in com]
-    return Classificacao(decisoes, frias, len(ids) - len(com))
+    titulos = {r[0] for r in con.execute(
+        f"SELECT titulo FROM playlists WHERE playlist_id IN ({','.join('?' * len(raizes))})", raizes
+    )}  # fmt: skip
+    return Classificacao(decisoes, [f for f in frias if f[0] in titulos], len(ids) - len(com))
 
 
 # ------------------------------------------------------------------ avaliação (#28)

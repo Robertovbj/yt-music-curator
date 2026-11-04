@@ -43,7 +43,7 @@ def test_mesma_receita_mesmo_banco_mesmo_resultado(con):
 
 def test_classificacao_ignora_dislikes_nas_decisoes_e_nos_centroides(con):
     dislike(con, "rock11", "rock01")
-    c = cl.classificar(con)
+    c = cl.classificar(con, em=["PLrock", "PLcalma"])
     ids = [d.video_id for d in c.decisoes]
     assert "rock11" not in ids and "rock10" in ids
     ps, _ = cl.perfis(con)

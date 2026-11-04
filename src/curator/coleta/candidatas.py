@@ -65,7 +65,7 @@ def sementes_de_playlist(con: sqlite3.Connection, ref: str, k: int) -> list[str]
 def sementes_de_cluster(con: sqlite3.Connection, cluster_id: int, k: int) -> list[str]:
     from curator.motor import clusters
 
-    aid = clusters.ultimo(con)
+    aid = clusters.ultimo_geral(con)
     if aid is None:
         raise SementeInvalida("nenhum agrupamento ainda; rode `curator reorganizar`")
     dislikes = consultas.bloqueadas(con)

@@ -56,7 +56,7 @@ def dados(con: sqlite3.Connection) -> dict:
         if vid in em_pl and pid in idx_pl:
             em_pl[vid].append(idx_pl[pid])
 
-    aid = clusters.ultimo(con)
+    aid = clusters.ultimo_geral(con)
     cs = clusters.carregar(con, aid) if aid else []
     em_cl: dict[str, list[int]] = {v: [] for v in ids}
     for i, c in enumerate(cs):
@@ -222,6 +222,7 @@ const $ = id => document.getElementById(id);
 const GL = (() => { try { return !!document.createElement("canvas").getContext("webgl"); } catch (e) { return false; } })();
 if (!GL) ["3", "pca3"].forEach(v => $("vista").querySelector(`option[value="${v}"]`).disabled = true);
 let selecionado = null;
+const tresD = () => ["3", "pca3"].includes($("vista").value);
 
 $("meta").textContent = `${F.length} de ${D.biblioteca} faixas analisadas · gerado em ${D.gerado_em}`;
 D.playlists.forEach((p, i) => $("playlist").insertAdjacentHTML("beforeend", `<option value="${i}">${esc(p)}</option>`));
@@ -302,7 +303,7 @@ function grupos() {
 }
 
 function traco(idx, extra) {
-  const tres = $("vista").value === "3";
+  const tres = tresD();
   const pts = idx.map(i => [i, posicao(i)]).filter(x => x[1]);
   const t = {
     type: tres ? "scatter3d" : GL ? "scattergl" : "scatter", mode: "markers",
@@ -316,7 +317,7 @@ function traco(idx, extra) {
 }
 
 function desenhar() {
-  const vista = $("vista").value, tres = vista === "3" || vista === "pca3";
+  const vista = $("vista").value, tres = tresD();
   $("espaco").disabled = vista === "va" || vista.startsWith("pca");
   const rot = eixosAtuais().map(e => e.rotulo);
   $("rotulo-pl").style.display = $("cor").value === "playlist" ? "" : "none";

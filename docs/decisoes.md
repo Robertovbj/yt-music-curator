@@ -291,6 +291,8 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 **Substitui** a heurística do helper (os 15 artistas mais frequentes e o julgamento da IA), que não usava o som e variava a cada execução.
 
+**Só nas playlists nomeadas (#80, 04/11):** as playlists existentes seguem a lógica do usuário (uma por jogo, uma por artista) e não são gabarito nem alvo por padrão. `curator classificar` exige `--em` (uma ou mais), `--mae` (as filhas) ou `--nas-gerais` (as playlists gerais do ADR-07); sem alvo, não sugere nada. Com `--nas-gerais`, as candidatas são as curtidas que ainda não estão em nenhuma geral, mesmo que estejam numa playlist antiga.
+
 **Avaliação (#28, 2026-11-04, `docs/avaliacao.md`):** k = 10, α = 0,6 e τ no percentil 10 ficaram como estavam, porque não houve gabarito confiável que indicasse outra coisa.
 - Nas filhas do Rock - All, montadas por uma IA, a concordância é muito puxada pelo artista principal. Elas serão refeitas pelo áudio (#74).
 - Nas raízes, montadas pelo usuário, a revocação é ~0,9, mas cada faixa passa no limiar de muitas playlists. Boa parte delas é por franquia e não por som; a calibração disso fica na #75.
@@ -315,6 +317,8 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 6. **Saída:** um **plano** com playlists novas, fusões, divisões e movimentações. Cada faixa aparece em todas as playlists sugeridas a que pertence. Nada é aplicado sem confirmação (ADR-10).
 
 **Determinismo:** os mesmos dados e os mesmos parâmetros (incluindo `random_state`) dão os mesmos clusters. Quando entram faixas novas, os clusters existentes são mantidos como âncoras: as faixas novas são atribuídas por centroide, e o reclustering completo só acontece quando você pede. Assim, os nomes e o pertencimento não mudam o tempo todo.
+
+**Playlists gerais (#80, 04/11):** `curator playlists sugerir` agrupa só as curtidas analisadas (escopo `curtidas`), ignorando todas as playlists existentes, e o plano só cria playlists novas, marcadas como gerais (`playlists.geral`) ao ser aplicado. Para dar poucas playlists amplas, o HDBSCAN roda no modo "leaf" com tamanho mínimo 40. Na biblioteca real (2.647 curtidas), o modo padrão ("eom") juntava tudo em 2 blocos de 1.100–1.800 faixas com qualquer tamanho mínimo; "leaf" com 40 deu 14 grupos de 100 a 640 faixas, cobrindo 86% das curtidas (40% em mais de uma). `--min-cluster` muda a granularidade; com outros parâmetros, o agrupamento é refeito. Nomes automáticos repetidos são numerados no plano; a IA (ou o usuário) renomeia antes. `curator reorganizar`, que compara com as playlists existentes (completar, fundir, dividir), passou a exigir `--mae`.
 
 ## ADR-08: Obtenção de áudio sem bloqueio
 
