@@ -81,7 +81,7 @@ def _metadados(con: sqlite3.Connection, ids: list[str]) -> dict[str, dict]:
         }
     for vid, pid in con.execute(
         f"SELECT pf.video_id, pf.playlist_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id) "
-        f"WHERE p.propria = 1 AND pf.video_id IN ({','.join('?' * len(ids))})",
+        f"WHERE p.propria = 1 AND p.ignorada = 0 AND pf.video_id IN ({','.join('?' * len(ids))})",
         ids,
     ):
         meta[vid]["playlists"].add(pid)
@@ -133,12 +133,17 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     validar(con, r)
     universo = _universo(con, r) if universo is None else sorted(set(universo))
     dislikes = consultas.com_dislike(con)
+    ignoradas = consultas.ignoradas(con)
+    if n := sum(v in ignoradas for v in universo):
+        universo = [v for v in universo if v not in ignoradas]
     sem_dislike = [v for v in universo if v not in dislikes]
     analisadas = set(espacos.analisadas(con))
     cand = [v for v in sem_dislike if v in analisadas]
     ex = Execucao(r.hash(), espacos.hash_biblioteca(con), [], len(universo), len(sem_dislike) - len(cand), 0)
     if len(sem_dislike) < len(universo):
         ex.descartes["dislike"] = len(universo) - len(sem_dislike)
+    if n:
+        ex.descartes["playlist ignorada"] = n
     if not cand:
         return ex
 

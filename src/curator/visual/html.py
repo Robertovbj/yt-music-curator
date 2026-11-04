@@ -47,7 +47,7 @@ def dados(con: sqlite3.Connection) -> dict:
     generos = [g for g, _ in sorted(pais.items(), key=lambda x: (-x[1], x[0]))[:MAX_GENEROS]] + ["Outros"]
 
     playlists = con.execute(
-        "SELECT playlist_id, titulo FROM playlists WHERE propria = 1 ORDER BY titulo"
+        "SELECT playlist_id, titulo FROM playlists WHERE propria = 1 AND descobertas = 0 AND ignorada = 0 ORDER BY titulo"
     ).fetchall()
     idx_pl = {p["playlist_id"]: i for i, p in enumerate(playlists)}
     em_pl: dict[str, list[int]] = {v: [] for v in ids}

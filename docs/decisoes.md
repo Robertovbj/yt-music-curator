@@ -178,6 +178,7 @@ src/curator/
   - **Exclusiva da mãe** = está na mãe, mas em nenhuma filha (o conceito do helper, mantido).
 - Uma faixa pode estar em várias folhas ao mesmo tempo. Isso é esperado (ver ADR-06/07).
 - **Biblioteca** exclui as playlists de descobertas (`playlists.descobertas`, criadas a partir de recomendações, ADR-13): o que só está nelas ainda não foi curtido.
+- **Playlists ignoradas** (`playlists.ignorada`, #77; `curator playlists ignorar`): as que não são de música (vídeos do YouTube comum numa conta conjunta, aulas). Somem de tudo: listagens, mapa, receitas, classificação, clusters, recomendações (sementes e candidatas), MCP e planos (um plano que as altere é recusado). Os vídeos que só estão nelas viram lista negra, mesmo curtidos, e não entram na fila de análise; quem também está numa playlist válida continua valendo por ela. A marcação fica no banco, sobrevive a `sincronizar` e a `hierarquia aplicar`, e as análises já feitas são guardadas (ADR-02).
 - **Faixas fora da biblioteca** (descurtidas, candidatas de recomendação) ficam guardadas com a análise (ADR-02), mas fora de todos os universos, do z-score, do mapa e dos clusters (`espacos.da_biblioteca`).
 
 **Avaliações (#60, #61).** `faixas.avaliacao` é `like`, `dislike` ou `neutra`, lida do `likeStatus` do ytmusicapi.

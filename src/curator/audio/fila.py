@@ -9,7 +9,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from curator.banco.conexao import agora as agora_iso
-from curator.banco.consultas import BIBLIOTECA
+from curator.banco.consultas import BIBLIOTECA, IGNORADAS
 
 
 def _iso(dt: datetime) -> str:
@@ -82,11 +82,12 @@ def recuperar(con: sqlite3.Connection) -> int:
 
 def proximo(con: sqlite3.Connection, agora: datetime, max_tentativas: int) -> sqlite3.Row | None:
     """Próximo item elegível: curtidas mais recentes primeiro, depois o resto da biblioteca, por último as
-    candidatas de recomendação (prioridade 1)."""
+    candidatas de recomendação (prioridade 1). Vídeos de playlists ignoradas (#77) nunca saem da fila."""
     return con.execute(
-        """SELECT q.* FROM fila_download q JOIN faixas f USING (video_id)
+        f"""SELECT q.* FROM fila_download q JOIN faixas f USING (video_id)
            WHERE q.status IN ('pendente', 'erro') AND q.tentativas < ?
              AND (q.proxima_tentativa_em IS NULL OR q.proxima_tentativa_em <= ?)
+             AND q.video_id NOT IN ({IGNORADAS})
            ORDER BY q.prioridade, f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1""",
         (max_tentativas, _iso(agora)),
     ).fetchone()
@@ -96,10 +97,11 @@ def reservar(con: sqlite3.Connection, agora: datetime, max_tentativas: int) -> s
     """Como `proximo`, mas já marca o item como "baixando" no mesmo comando: dois workers em paralelo
     nunca pegam a mesma faixa (um UPDATE é atômico no SQLite)."""
     return con.execute(
-        """UPDATE fila_download SET status = 'baixando', atualizada_em = :m WHERE video_id = (
+        f"""UPDATE fila_download SET status = 'baixando', atualizada_em = :m WHERE video_id = (
              SELECT q.video_id FROM fila_download q JOIN faixas f USING (video_id)
              WHERE q.status IN ('pendente', 'erro') AND q.tentativas < :max
                AND (q.proxima_tentativa_em IS NULL OR q.proxima_tentativa_em <= :agora)
+               AND q.video_id NOT IN ({IGNORADAS})
              ORDER BY q.prioridade, f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1)
            RETURNING *""",
         {"m": agora_iso(), "max": max_tentativas, "agora": _iso(agora)},

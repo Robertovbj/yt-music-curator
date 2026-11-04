@@ -51,7 +51,7 @@ def sementes_de_playlist(con: sqlite3.Connection, ref: str, k: int) -> list[str]
     pid = resolver_playlist(con, ref)
     if pid is None:
         raise SementeInvalida(f"playlist '{ref}' não encontrada (use o id ou o título exato)")
-    dislikes = consultas.com_dislike(con)
+    dislikes = consultas.bloqueadas(con)
     ids = [
         r[0]
         for r in con.execute(
@@ -68,7 +68,7 @@ def sementes_de_cluster(con: sqlite3.Connection, cluster_id: int, k: int) -> lis
     aid = clusters.ultimo(con)
     if aid is None:
         raise SementeInvalida("nenhum agrupamento ainda; rode `curator reorganizar`")
-    dislikes = consultas.com_dislike(con)
+    dislikes = consultas.bloqueadas(con)
     ids = [
         r[0]
         for r in con.execute(
@@ -109,10 +109,10 @@ def resolver_sementes(
     k: int = 5,
 ) -> list[str]:
     """Junta as sementes dadas (faixas primeiro), sem repetir e sem dislikes. Determinístico."""
-    dislikes = consultas.com_dislike(con)
+    dislikes = consultas.bloqueadas(con)
     out = [v for v in faixas or [] if v not in dislikes]
     if rejeitadas := [v for v in faixas or [] if v in dislikes]:
-        log.info("sementes com dislike ignoradas: %s", rejeitadas)
+        log.info("sementes com dislike ou de playlist ignorada descartadas: %s", rejeitadas)
     if playlist:
         out += sementes_de_playlist(con, playlist, k)
     if cluster is not None:

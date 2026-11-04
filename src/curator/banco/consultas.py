@@ -2,13 +2,25 @@
 
 import sqlite3
 
-# Playlists de descobertas (criadas a partir de recomendações, ADR-13) não contam: o que só está nelas
-# ainda não foi curtido.
-BIBLIOTECA = """
-    SELECT video_id FROM faixas WHERE curtida = 1
-    UNION
-    SELECT pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
-    WHERE p.propria = 1 AND p.descobertas = 0
+# Playlists que o motor enxerga: próprias, nem de descobertas (criadas a partir de recomendações, ADR-13: o
+# que só está nelas ainda não foi curtido) nem ignoradas (#77). Use com o alias `p`.
+PLAYLISTS_VALIDAS = "p.propria = 1 AND p.descobertas = 0 AND p.ignorada = 0"
+
+# Vídeos de playlists ignoradas (#77) que não estão em nenhuma playlist válida: lista negra para tudo,
+# mesmo curtidos. Quem também está numa playlist válida continua valendo por ela.
+IGNORADAS = f"""
+    SELECT pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id) WHERE p.ignorada = 1
+    EXCEPT
+    SELECT pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id) WHERE {PLAYLISTS_VALIDAS}
+"""
+
+BIBLIOTECA = f"""
+    SELECT video_id FROM (
+        SELECT video_id FROM faixas WHERE curtida = 1
+        UNION
+        SELECT pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
+        WHERE {PLAYLISTS_VALIDAS}
+    ) WHERE video_id NOT IN ({IGNORADAS})
 """
 
 
@@ -30,6 +42,15 @@ def com_dislike(con: sqlite3.Connection) -> set[str]:
     return set(_ids(con, DISLIKES))
 
 
+def ignoradas(con: sqlite3.Connection) -> set[str]:
+    return set(_ids(con, IGNORADAS))
+
+
+def bloqueadas(con: sqlite3.Connection) -> set[str]:
+    """Dislikes ∪ vídeos de playlists ignoradas: nunca entram em nada que o motor gera ou sugere."""
+    return com_dislike(con) | ignoradas(con)
+
+
 def utilizaveis(con: sqlite3.Connection) -> list[str]:
     """A biblioteca sem as faixas com dislike: o que o motor pode usar."""
     return _ids(
@@ -42,7 +63,8 @@ def dislikes_em_playlists(con: sqlite3.Connection) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for pid, vid in con.execute(
         f"""SELECT DISTINCT pf.playlist_id, pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
-            WHERE p.propria = 1 AND pf.video_id IN ({DISLIKES}) ORDER BY pf.playlist_id, pf.video_id"""
+            WHERE p.propria = 1 AND p.ignorada = 0 AND pf.video_id IN ({DISLIKES})
+            ORDER BY pf.playlist_id, pf.video_id"""
     ):
         out.setdefault(pid, []).append(vid)
     return out
@@ -52,9 +74,10 @@ def nao_alocadas(con: sqlite3.Connection) -> list[str]:
     """Curtidas que não estão em nenhuma playlist própria, da curtida mais recente para a mais antiga."""
     return _ids(
         con,
-        """SELECT f.video_id FROM faixas f WHERE f.curtida = 1 AND f.avaliacao != 'dislike' AND NOT EXISTS (
+        f"""SELECT f.video_id FROM faixas f WHERE f.curtida = 1 AND f.avaliacao != 'dislike'
+            AND f.video_id NOT IN ({IGNORADAS}) AND NOT EXISTS (
                SELECT 1 FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
-               WHERE p.propria = 1 AND p.descobertas = 0 AND pf.video_id = f.video_id)
+               WHERE {PLAYLISTS_VALIDAS} AND pf.video_id = f.video_id)
            ORDER BY f.posicao_curtida""",
     )
 
@@ -86,7 +109,7 @@ def estatisticas(con: sqlite3.Connection) -> dict:
             """SELECT p.titulo, p.tipo, m.titulo AS mae, count(pf.video_id) AS faixas
                FROM playlists p LEFT JOIN playlists m ON m.playlist_id = p.mae_id
                LEFT JOIN playlist_faixas pf ON pf.playlist_id = p.playlist_id
-               WHERE p.propria = 1 GROUP BY p.playlist_id ORDER BY p.titulo"""
+               WHERE p.propria = 1 AND p.ignorada = 0 GROUP BY p.playlist_id ORDER BY p.titulo"""
         )
     ]
     return {
@@ -99,6 +122,8 @@ def estatisticas(con: sqlite3.Connection) -> dict:
             f"SELECT count(*) FROM analises WHERE status = 'ok' AND video_id NOT IN {bib}"
         ),
         "playlists_proprias": len(playlists),
+        "playlists_ignoradas": um("SELECT count(*) FROM playlists WHERE ignorada = 1"),
+        "videos_ignorados": len(ignoradas(con)),
         "duracao_total_h": round(
             (um(f"SELECT coalesce(sum(duracao_s), 0) FROM faixas WHERE video_id IN {bib}") or 0) / 3600, 1
         ),

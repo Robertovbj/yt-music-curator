@@ -107,17 +107,23 @@ def vocabulario(con: sqlite3.Connection) -> dict[str, list[str]]:
         "artistas": [r[0] for r in con.execute("SELECT DISTINCT nome FROM artistas ORDER BY nome")],
         "playlists": [
             r[0]
-            for r in con.execute("SELECT playlist_id FROM playlists WHERE propria = 1 ORDER BY playlist_id")
+            for r in con.execute(
+                "SELECT playlist_id FROM playlists WHERE propria = 1 AND ignorada = 0 ORDER BY playlist_id"
+            )
         ],
         "titulos_playlists": [
-            r[0] for r in con.execute("SELECT titulo FROM playlists WHERE propria = 1 ORDER BY titulo")
+            r[0]
+            for r in con.execute(
+                "SELECT titulo FROM playlists WHERE propria = 1 AND ignorada = 0 ORDER BY titulo"
+            )
         ],
     }
 
 
 def resolver_playlist(con: sqlite3.Connection, ref: str) -> str | None:
+    """Id da playlist própria por id ou título. Ignoradas (#77) não existem para o motor."""
     linha = con.execute(
-        "SELECT playlist_id FROM playlists WHERE propria = 1 AND (playlist_id = ? OR titulo = ?) ORDER BY playlist_id = ? DESC LIMIT 1",
+        "SELECT playlist_id FROM playlists WHERE propria = 1 AND ignorada = 0 AND (playlist_id = ? OR titulo = ?) ORDER BY playlist_id = ? DESC LIMIT 1",
         (ref, ref, ref),
     ).fetchone()
     return linha[0] if linha else None

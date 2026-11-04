@@ -203,6 +203,7 @@ def candidatas(
     agregados = agregar(rc.ler_coletas(con, coleta_ids), cfg["recomendacoes"]["pesos_fontes"])
     meta = _meta(con, sorted(agregados))
     dentro = set(consultas.biblioteca(con))
+    ignoradas = consultas.ignoradas(con)
     hist = {} if conhecidas else rc.historico(con, ref["recomendacao_id"] if ref else None)
     pen = cfg["recomendacoes"]["penalidade_repeticao"]
     proibidos = [normalizar(a) for a in p.excluir_artistas]
@@ -217,6 +218,9 @@ def candidatas(
             continue
         if m["avaliacao"] == "dislike":
             rk.descartes["dislike"] += 1
+            continue
+        if vid in ignoradas:
+            rk.descartes["playlist ignorada"] += 1
             continue
         if conhecidas != (vid in dentro):
             if not conhecidas:

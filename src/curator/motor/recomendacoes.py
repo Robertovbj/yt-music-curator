@@ -129,7 +129,7 @@ STATUS_SQL = """
         WHEN f.avaliacao = 'dislike' THEN 'dislike'
         WHEN f.curtida = 1 THEN 'curtida'
         WHEN EXISTS (SELECT 1 FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
-                     WHERE pf.video_id = f.video_id AND p.propria = 1 AND p.descobertas = 0) THEN 'em_playlist'
+                     WHERE pf.video_id = f.video_id AND p.propria = 1 AND p.descobertas = 0 AND p.ignorada = 0) THEN 'em_playlist'
         ELSE 'sem_reacao'
     END
 """

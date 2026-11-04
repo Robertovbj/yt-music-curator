@@ -29,11 +29,11 @@ def _agregadoras_acima(con: sqlite3.Connection, pid: str) -> list[str]:
     atual = con.execute("SELECT mae_id FROM playlists WHERE playlist_id = ?", (pid,)).fetchone()
     while atual and atual[0]:
         mae = con.execute(
-            "SELECT playlist_id, tipo, mae_id FROM playlists WHERE playlist_id = ?", (atual[0],)
+            "SELECT playlist_id, tipo, mae_id, ignorada FROM playlists WHERE playlist_id = ?", (atual[0],)
         ).fetchone()
         if mae is None:
             break
-        if mae["tipo"] == "agregadora":
+        if mae["tipo"] == "agregadora" and not mae["ignorada"]:
             out.append(mae["playlist_id"])
         atual = (mae["mae_id"],)
     return out
@@ -58,6 +58,24 @@ def _propagar(con: sqlite3.Connection, ops: list[Operacao]) -> list[Operacao]:
                     alvo.video_ids.append(v)
                     alvo.motivo[v] = "agregadora: contém tudo o que está nas filhas"
     return ops + list(extra.values())
+
+
+class PlaylistIgnorada(ValueError):
+    """O plano mexeria numa playlist marcada como ignorada (#77): ela fica de fora de tudo."""
+
+
+def _conferir_ignoradas(con: sqlite3.Connection, ops: list[Operacao]) -> list[Operacao]:
+    """Recusa operar numa playlist ignorada e tira dos acréscimos os vídeos que estão numa delas."""
+    from curator.banco.consultas import ignoradas
+
+    proibidas = dict(con.execute("SELECT playlist_id, titulo FROM playlists WHERE ignorada = 1"))
+    if tocadas := sorted({proibidas[o.playlist] for o in ops if o.playlist in proibidas}):
+        raise PlaylistIgnorada(f"playlist ignorada não entra em plano: {', '.join(tocadas)}")
+    bloqueados = ignoradas(con)
+    for o in ops:
+        if o.tipo == "adicionar":
+            o.video_ids = [v for v in o.video_ids if v not in bloqueados]
+    return ops
 
 
 class NovasNaBiblioteca(ValueError):
@@ -96,6 +114,7 @@ def criar(
     ops = [o for o in ops if o.tipo in ("criar", "renomear") or o.video_ids]
     if not ops:
         raise ValueError("plano vazio: nenhuma alteração")
+    ops = _conferir_ignoradas(con, ops)
     if not permitir_novas:
         _conferir_novas(con, ops)
     if propagar_agregadoras:
