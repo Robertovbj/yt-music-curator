@@ -63,6 +63,9 @@ def estatisticas(con: sqlite3.Connection) -> dict:
         "biblioteca": um(f"SELECT count(*) FROM {bib}"),
         "curtidas": um("SELECT count(*) FROM faixas WHERE curtida = 1"),
         "nao_alocadas": len(nao_alocadas(con)),
+        "analisadas_fora_da_biblioteca": um(
+            f"SELECT count(*) FROM analises WHERE status = 'ok' AND video_id NOT IN {bib}"
+        ),
         "playlists_proprias": len(playlists),
         "duracao_total_h": round(
             (um(f"SELECT coalesce(sum(duracao_s), 0) FROM faixas WHERE video_id IN {bib}") or 0) / 3600, 1

@@ -20,6 +20,8 @@ def estatisticas(como_json: bool = typer.Option(False, "--json", help="Saída em
         f"biblioteca: {est['biblioteca']} faixas ({est['duracao_total_h']} h) · curtidas: {est['curtidas']} · "
         f"não alocadas: {est['nao_alocadas']} · playlists próprias: {est['playlists_proprias']}"
     )
+    if est["analisadas_fora_da_biblioteca"]:
+        typer.echo(f"analisadas fora da biblioteca (guardadas): {est['analisadas_fora_da_biblioteca']}")
     typer.echo("análise: " + (", ".join(f"{k}: {v}" for k, v in sorted(est["analise"].items())) or "—"))
     for p in est["playlists"]:
         agreg = " [agregadora]" if p["tipo"] == "agregadora" else ""
