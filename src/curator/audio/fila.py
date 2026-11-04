@@ -128,4 +128,9 @@ def resumo(con: sqlite3.Connection, max_tentativas: int) -> dict:
     erros = con.execute(
         "SELECT tipo_erro, count(*) FROM fila_download WHERE status = 'erro' GROUP BY tipo_erro"
     ).fetchall()
-    return {"por_status": por_status, "esgotados": esgotados, "erros_por_tipo": dict(erros)}
+    premium = con.execute(
+        "SELECT count(*) FROM fila_download WHERE status = 'sem-audio' AND tipo_erro = 'premium'"
+    ).fetchone()[0]
+    return {
+        "por_status": por_status, "esgotados": esgotados, "erros_por_tipo": dict(erros), "sem_audio_premium": premium,
+    }  # fmt: skip

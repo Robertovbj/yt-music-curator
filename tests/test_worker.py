@@ -1,9 +1,10 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from curator.audio import fila
-from curator.audio.worker import Worker
+from curator.audio.worker import ESPERA_TRAVA_S, MAX_TRAVAS_SEGUIDAS, Worker
 from curator.config import caminhos, carregar_config
 from tests.falso_audio import AnalisadorFalso, ProvedorFalso
 from tests.falso_yt import biblioteca_exemplo
@@ -64,6 +65,24 @@ def test_fluxo_feliz_grava_e_apaga_audio(con, cfg):
     assert con.execute("SELECT uso_hoje, sucessos FROM proxies WHERE nome = 'direta'").fetchone()[:] == (2, 2)
 
 
+def test_pausa_propria_da_saida_substitui_a_do_fila(con, cfg):
+    cfg["proxy"] = [
+        {"nome": "lenta", "url": "socks5://10.0.0.1:1080", "intervalo_min_s": 40, "intervalo_max_s": 60}
+    ]
+    yt = ProvedorFalso("youtube_music", ["ok", "ok", "ok"])
+    esperas = []
+    w = Worker(
+        con, cfg, AnalisadorFalso(), {yt.nome: yt}, relogio=Relogio(), dormir=esperas.append, saida="lenta"
+    )
+    w.rodar(limite=3)
+    assert len(esperas) == 2 and all(40 <= e <= 60 for e in esperas)
+    w2, esperas2 = worker(
+        con, cfg, [ProvedorFalso("youtube_music", ["ok", "ok"])]
+    )  # sem saída fixa: a do [fila]
+    w2.rodar(limite=2)
+    assert all(cfg["fila"]["intervalo_min_s"] <= e <= cfg["fila"]["intervalo_max_s"] for e in esperas2)
+
+
 def test_progresso_uma_linha_por_faixa(con, cfg):
     yt = ProvedorFalso("youtube_music", ["ok", "indisponivel"])
     w, _ = worker(con, cfg, [yt])
@@ -106,6 +125,22 @@ def test_indisponivel_cai_para_o_proximo_provedor(con, cfg):
     ] == ("youtube_busca", 0.9)
 
 
+def test_premium_tenta_a_busca_e_sem_alternativa_fica_marcado(con, cfg):
+    yt = ProvedorFalso("youtube_music", ["premium", "premium"])
+    busca = ProvedorFalso("youtube_busca", ["ok", "nada"], score=0.9, exato=False)
+    w, _ = worker(con, cfg, [yt, busca])
+    w.rodar(limite=2)
+    assert status(con, "a") == "ok"  # achou a mesma música em outro vídeo
+    assert status(con, "b") == "sem-audio"
+    tipo, erro = con.execute(
+        "SELECT tipo_erro, ultimo_erro FROM fila_download WHERE video_id = 'b'"
+    ).fetchone()
+    assert tipo == "premium" and "Music Premium" in erro
+    assert "Music Premium" in con.execute("SELECT erro FROM analises WHERE video_id = 'b'").fetchone()[0]
+    assert fila.resumo(con, 5)["sem_audio_premium"] == 1
+    assert con.execute("SELECT falhas FROM proxies WHERE nome = 'direta'").fetchone()[0] == 0
+
+
 def test_candidato_abaixo_do_limiar_nao_e_analisado(con, cfg):
     busca = ProvedorFalso("youtube_busca", ["ok"], score=0.5, exato=False)
     an = AnalisadorFalso()
@@ -120,6 +155,13 @@ def test_duracao_divergente_descarta_candidato_de_busca(con, cfg):
     w, _ = worker(con, cfg, [busca], AnalisadorFalso(duracao=400.0))  # faixa tem 200 s
     w.rodar(limite=1)
     assert status(con, "a") == "sem-audio"
+
+
+def test_download_parcial_de_busca_nao_e_descartado_pela_duracao(con, cfg):
+    busca = ProvedorFalso("youtube_busca", ["ok"], score=0.95, exato=False, parcial=True)
+    w, _ = worker(con, cfg, [busca], AnalisadorFalso(duracao=400.0))  # só o começo de uma faixa longa
+    w.rodar(limite=1)
+    assert status(con, "a") == "ok"
 
 
 def test_erro_transitorio_agenda_nova_tentativa(con, cfg):
@@ -269,3 +311,104 @@ def test_paralelo_bloqueio_numa_saida_nao_para_as_outras(con, cfg):
     assert (
         con.execute("SELECT quarentena_ate IS NOT NULL FROM proxies WHERE nome = 'direta'").fetchone()[0] == 1
     )
+
+
+def test_erro_de_analise_nao_poe_a_saida_em_quarentena(con, cfg):
+    class AnalisadorQuebrado(AnalisadorFalso):
+        def analisar(self, caminho):
+            raise RuntimeError(
+                "In RhythmExtractor2013.compute: Descriptor name 'internal.bpm' of type Real not found"
+            )
+
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", [])], AnalisadorQuebrado())
+    rel = w.rodar()
+    assert rel.contagem == {"erro": 7}
+    p = con.execute(
+        "SELECT falhas, falhas_seguidas, quarentena_ate FROM proxies WHERE nome = 'direta'"
+    ).fetchone()
+    assert tuple(p) == (0, 0, None)  # 7 erros de análise e nenhuma falha atribuída à rede
+    assert (
+        con.execute("SELECT tipo_erro FROM fila_download WHERE video_id = 'a'").fetchone()[0] == "ErroAnalise"
+    )
+
+
+def test_aguardar_dorme_ate_a_quarentena_acabar_e_continua(con, cfg):
+    from curator.audio import proxies
+
+    relogio = Relogio()
+    esperas = []
+
+    def dormir(s):  # o tempo "passa" enquanto o worker dorme
+        esperas.append(s)
+        relogio.t += timedelta(seconds=s)
+
+    yt = ProvedorFalso("youtube_music", ["bloqueio"])
+    w = Worker(con, cfg, AnalisadorFalso(), {"youtube_music": yt}, relogio=relogio, dormir=dormir)
+    rel = w.rodar(limite=2, aguardar=True)
+    assert rel.contagem == {"bloqueio": 1, "ok": 2}
+    fim_quarentena = T0 + timedelta(hours=cfg["disjuntor"]["quarentena_inicial_h"])
+    assert relogio.t >= fim_quarentena  # dormiu até a quarentena acabar (somando a pausa normal)
+    assert max(esperas) > 3600  # e foi uma espera longa, não só a pausa entre downloads
+    assert proxies.escolher(con, relogio.t) is not None
+
+
+def test_sem_aguardar_continua_parando(con, cfg):
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["bloqueio"])])
+    assert w.rodar().motivo_parada == "todas as saídas em quarentena ou sem cota"
+
+
+# ------------------------------------------------------------------ banco travado por outra conexão
+
+
+def _trava_uma_vez(monkeypatch, modulo, nome):
+    original, chamadas = getattr(modulo, nome), []
+
+    def falso(*a, **kw):
+        chamadas.append(1)
+        if len(chamadas) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return original(*a, **kw)
+
+    monkeypatch.setattr(modulo, nome, falso)
+
+
+def test_trava_ao_reservar_espera_e_continua(con, cfg, monkeypatch):
+    _trava_uma_vez(monkeypatch, fila, "reservar")
+    w, esperas = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok", "ok"])])
+    rel = w.rodar(limite=2)
+    assert rel.contagem == {"ok": 2}  # a vaga da tentativa travada foi devolvida
+    assert esperas[0] == ESPERA_TRAVA_S
+
+
+def test_trava_no_meio_da_faixa_devolve_a_fila_sem_culpar_a_saida(con, cfg, monkeypatch):
+    from curator.audio import proxies
+
+    _trava_uma_vez(monkeypatch, proxies, "registrar_sucesso")
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok", "ok"])])
+    rel = w.rodar(limite=1)
+    assert rel.contagem == {"ok": 1}
+    falhas = con.execute("SELECT falhas FROM proxies WHERE nome = 'direta'").fetchone()[0]
+    reservadas = con.execute("SELECT COUNT(*) FROM fila_download WHERE status IN ('baixando', 'analisando')")
+    assert falhas == 0 and reservadas.fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM fila_download WHERE tentativas > 0").fetchone()[0] == 0
+
+
+def test_erro_do_banco_que_nao_e_trava_continua_parando(con, cfg, monkeypatch):
+    def quebrado(*a, **kw):
+        raise sqlite3.OperationalError("no such table: fila_download")
+
+    monkeypatch.setattr(fila, "reservar", quebrado)
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok"])])
+    with pytest.raises(sqlite3.OperationalError):
+        w.rodar()
+
+
+def test_travas_seguidas_demais_param_o_worker(con, cfg, monkeypatch):
+    def sempre(*a, **kw):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(fila, "reservar", sempre)
+    w, esperas = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok"])])
+    with pytest.raises(sqlite3.OperationalError):
+        w.rodar()
+    assert len(esperas) == MAX_TRAVAS_SEGUIDAS

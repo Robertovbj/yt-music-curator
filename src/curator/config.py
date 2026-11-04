@@ -50,7 +50,7 @@ PADRAO: dict = {
     "pasta_local": {
         "caminho": "",
     },
-    "proxy": [],  # [[proxy]] nome = "...", url = "socks5://...", cota_diaria = 200
+    "proxy": [],  # [[proxy]] nome = "...", url = "socks5://..."; opcionais: cota_diaria, intervalo_min_s/max_s
 }
 
 

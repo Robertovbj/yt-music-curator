@@ -15,13 +15,14 @@ import json
 import logging
 import random
 import signal
+import sqlite3
 import tempfile
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from curator.audio import fila, proxies
@@ -31,12 +32,21 @@ from curator.audio.provedores.base import (
     Candidato,
     ErroBloqueio,
     ErroIndisponivel,
+    ErroPremium,
     FaixaAlvo,
     ProvedorAudio,
     Saida,
 )
 
 log = logging.getLogger(__name__)
+
+ESPERA_MAXIMA = timedelta(hours=26)  # no modo aguardar, nunca dorme mais que isso de uma vez
+ESPERA_TRAVA_S = 30  # banco travado por outra conexão: espera e retoma, em vez de a thread morrer
+MAX_TRAVAS_SEGUIDAS = 10
+
+
+class ErroAnalise(RuntimeError):
+    """O download funcionou, mas a análise falhou: a culpa não é da saída de rede."""
 
 
 @dataclass
@@ -156,6 +166,7 @@ class Worker:
         ate: datetime | None = None,
         ao_processar: Callable[[Progresso], None] | None = None,
         preparar: bool = True,
+        aguardar: bool = False,
     ) -> Relatorio:
         """`ao_processar` recebe um `Progresso` depois de cada faixa (a CLI imprime uma linha por faixa).
 
@@ -168,6 +179,7 @@ class Worker:
             proxies.sincronizar_config(self.con, self.cfg)
             if n := fila.recuperar(self.con):
                 log.info("%d item(ns) interrompido(s) voltaram para a fila", n)
+        travas = 0
         while True:
             if self.parar:
                 rel.motivo_parada = "interrompido"
@@ -179,14 +191,28 @@ class Worker:
             if vaga is None:
                 rel.motivo_parada = f"limite de {self.comp.limite} faixa(s)"
                 break
-            item = fila.reservar(self.con, self.relogio(), self.max_tentativas)
-            if item is None:
+            item = None
+            try:
+                item = fila.reservar(self.con, self.relogio(), self.max_tentativas)
+                if item is None:
+                    self.comp.devolver_vaga()
+                    break
+                inicio = time.perf_counter()
+                resultado, usou_rede = self._processar(item)
+            except sqlite3.OperationalError as e:
+                if not _travado(e) or travas >= MAX_TRAVAS_SEGUIDAS:
+                    raise
+                travas += 1
                 self.comp.devolver_vaga()
-                break
-            inicio = time.perf_counter()
-            resultado, usou_rede = self._processar(item)
+                self._devolver(item)
+                log.warning("saída %s: banco travado (%s); retomando em %d s", self.saida, e, ESPERA_TRAVA_S)
+                self.dormir(ESPERA_TRAVA_S)
+                continue
+            travas = 0
             if resultado in ("sem_saida", "bloqueio"):
                 self.comp.devolver_vaga()  # não conta para o limite
+            if resultado == "sem_saida" and aguardar and self._aguardar_liberacao(ate):
+                continue
             if resultado == "sem_saida":
                 rel.motivo_parada = (
                     "todas as saídas em quarentena ou sem cota"
@@ -207,9 +233,36 @@ class Worker:
                 )
             restam = self.comp.limite is None or self.comp.processadas < self.comp.limite
             if usou_rede and not self.parar and restam:
-                f = self.cfg["fila"]
-                self.dormir(self.rng.uniform(f["intervalo_min_s"], f["intervalo_max_s"]))
+                self.dormir(self._pausa())
         return rel
+
+    def _pausa(self) -> float:
+        """Entre downloads: a pausa do `[[proxy]]` desta saída, se ele definir uma, senão a do `[fila]`."""
+        f = self.cfg["fila"]
+        p = next((p for p in self.cfg.get("proxy", []) if p.get("nome") == self.saida), {})
+        return self.rng.uniform(
+            p.get("intervalo_min_s", f["intervalo_min_s"]), p.get("intervalo_max_s", f["intervalo_max_s"])
+        )
+
+    def _devolver(self, item) -> None:
+        """Depois de uma trava do banco: a faixa reservada volta a pendente (se o banco deixar)."""
+        if item is None:
+            return
+        try:
+            fila.marcar(self.con, item["video_id"], "pendente")
+        except sqlite3.OperationalError:
+            log.warning("%s ficou reservada; volta à fila no próximo lote", item["video_id"])
+
+    def _aguardar_liberacao(self, ate: datetime | None) -> bool:
+        """Modo serviço: dorme até a saída sair da quarentena ou a cota virar. False = desistir (parada/limite)."""
+        agora = self.relogio()
+        libera = proxies.proxima_liberacao(self.con, agora, self.saida)
+        if libera is None or libera - agora > ESPERA_MAXIMA or (ate and libera >= ate):
+            return False
+        segundos = max((libera - agora).total_seconds(), 1) + self.rng.uniform(5, 60)
+        log.warning("saída %s indisponível; aguardando até %s", self.saida or "(todas)", libera.astimezone())
+        self.dormir(segundos)
+        return not self.parar
 
     # ------------------------------------------------------------------ uma faixa
 
@@ -218,6 +271,7 @@ class Worker:
         faixa = carregar_faixa(self.con, vid)
         tentados: list[str] = json.loads(item["provedores_tentados"])
         usou_rede = False
+        premium: list[str] = []  # provedores que só tinham a faixa para assinantes do Music Premium
         for nome, prov in self.provedores.items():
             if nome in tentados:
                 continue
@@ -237,10 +291,16 @@ class Worker:
                 return "bloqueio", usou_rede
             except (ErroIndisponivel, AudioInvalido) as e:
                 log.info("%s: %s não tem a faixa (%s)", faixa.titulo, nome, _resumir(e))
+                if isinstance(e, ErroPremium):
+                    premium.append(nome)
                 status = None
             except Exception as e:
+                if isinstance(e, sqlite3.OperationalError) and _travado(e):
+                    raise  # culpa do banco, não da saída nem da faixa: `rodar` devolve à fila e espera
                 log.warning("%s: erro em %s (%s); nova tentativa mais tarde", faixa.titulo, nome, _resumir(e))
-                if saida:
+                if saida and isinstance(e, ErroAnalise):
+                    proxies.registrar_sucesso(self.con, saida.nome)  # o download deu certo
+                elif saida:
                     proxies.registrar_falha(self.con, saida.nome, self.cfg, self.relogio())
                 fila.falhar(self.con, vid, type(e).__name__, str(e), self.cfg, self.relogio(), self.rng)
                 fila.marcar(self.con, vid, "erro", provedores_tentados=tentados)
@@ -260,9 +320,15 @@ class Worker:
             tentados.append(nome)
             fila.marcar(self.con, vid, "pendente", provedores_tentados=tentados)
 
-        gravar_falha(self.con, vid, "sem-audio", f"nenhum provedor teve a faixa ({', '.join(tentados)})")
-        fila.marcar(self.con, vid, "sem-audio", provedores_tentados=tentados)
-        log.info("%s: sem áudio em nenhum provedor", faixa.titulo)
+        motivo = f"nenhum provedor teve a faixa ({', '.join(tentados)})"
+        if premium:
+            motivo = f"só para assinantes do Music Premium ({', '.join(premium)}); {motivo}"
+        gravar_falha(self.con, vid, "sem-audio", motivo)
+        fila.marcar(
+            self.con, vid, "sem-audio", provedores_tentados=tentados,
+            tipo_erro="premium" if premium else None, ultimo_erro=motivo if premium else None,
+        )  # fmt: skip
+        log.info("%s: sem áudio em nenhum provedor%s", faixa.titulo, " (Music Premium)" if premium else "")
         return "sem_audio", usou_rede
 
     def _tentar(self, faixa: FaixaAlvo, nome: str, prov: ProvedorAudio, saida: Saida | None) -> str | None:
@@ -277,9 +343,20 @@ class Worker:
             if saida:
                 proxies.registrar_uso(self.con, saida.nome, self.relogio())
             fila.marcar(self.con, faixa.video_id, "analisando")
-            r = self.analisador.analisar(arquivo.caminho)
+            try:
+                r = self.analisador.analisar(arquivo.caminho)
+            except AudioInvalido:
+                raise
+            except Exception as e:
+                raise ErroAnalise(f"análise falhou: {e}") from e
             # o diretório temporário (e o áudio) somem ao sair do `with`, mesmo com exceção
-        if not melhor.exato and faixa.duracao_s and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia:
+        # um download parcial não tem a duração da faixa; o casamento já conferiu a duração do candidato
+        if (
+            not melhor.exato
+            and not arquivo.parcial
+            and faixa.duracao_s
+            and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia
+        ):
             raise ErroIndisponivel(
                 f"duração baixada {r.duracao_s:.0f}s ≠ esperada {faixa.duracao_s}s; candidato descartado"
             )
@@ -289,6 +366,10 @@ class Worker:
             VERSAO_ANALISADOR, self.analisador.hash_modelos, round(time.perf_counter() - inicio, 2),
         )  # fmt: skip
         return "ok"
+
+
+def _travado(e: sqlite3.OperationalError) -> bool:
+    return "locked" in str(e) or "busy" in str(e)
 
 
 def _resumir(e: Exception) -> str:
@@ -334,6 +415,7 @@ def rodar_em_paralelo(
     ate: datetime | None = None,
     ao_processar: Callable[[Progresso], None] | None = None,
     compartilhado: Compartilhado | None = None,
+    aguardar: bool = False,
     **kw,
 ) -> Relatorio:
     """Um worker por saída ativa (direta + proxies do config), em threads, dividindo limite e parada."""
@@ -354,7 +436,7 @@ def rodar_em_paralelo(
         c = abrir(caminho_banco)
         try:
             w = Worker(c, cfg, an, montar_provedores(cfg, c), saida=nome, compartilhado=comp, **kw)
-            r = w.rodar(ate=ate, ao_processar=ao_processar, preparar=False)
+            r = w.rodar(ate=ate, ao_processar=ao_processar, preparar=False, aguardar=aguardar)
         except Exception:
             log.exception("worker da saída %s parou com erro", nome)
             r = Relatorio(motivo_parada=f"erro na saída {nome}")

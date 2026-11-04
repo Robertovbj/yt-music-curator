@@ -33,6 +33,11 @@ def _horario(texto: str) -> datetime:
 def analisar(
     limite: int | None = typer.Option(None, "--limite", "-n", help="Para depois de N faixas."),
     ate: str | None = typer.Option(None, "--ate", help="Para no horário HH:MM (local)."),
+    aguardar: bool = typer.Option(
+        False,
+        "--aguardar",
+        help="Com saídas em quarentena ou sem cota, espera em vez de parar (modo serviço).",
+    ),
 ) -> None:
     """Consome a fila: baixa o áudio, analisa com o Essentia, grava e apaga o áudio."""
     try:
@@ -43,7 +48,7 @@ def analisar(
 
     try:
         with trava_worker(caminhos().dados_dir / "worker.lock"):
-            rel = _rodar_worker(Analisador, limite, ate)
+            rel = _rodar_worker(Analisador, limite, ate, aguardar)
     except OutroWorkerRodando as e:
         typer.echo(f"{e}; nada a fazer.")  # código 0: o timer não registra falha
         return
@@ -59,7 +64,7 @@ def analisar(
         typer.echo(f"próxima saída disponível: {rel.proxima_liberacao.astimezone():%d/%m %H:%M}")
 
 
-def _rodar_worker(Analisador, limite: int | None, ate: str | None):  # noqa: N803
+def _rodar_worker(Analisador, limite: int | None, ate: str | None, aguardar: bool = False):  # noqa: N803
     """Um worker por saída de rede ativa (direta + [[proxy]] do config), downloads em paralelo."""
     from curator.audio import provedores
     from curator.audio.worker import Compartilhado, instalar_sinais, rodar_em_paralelo
@@ -79,7 +84,7 @@ def _rodar_worker(Analisador, limite: int | None, ate: str | None):  # noqa: N80
     return rodar_em_paralelo(
         caminhos().banco, cfg, analisador, provedores.montar,
         limite=limite, ate=_horario(ate) if ate else None,
-        ao_processar=lambda p: typer.echo(p.linha(), err=True), compartilhado=comp,
+        ao_processar=lambda p: typer.echo(p.linha(), err=True), compartilhado=comp, aguardar=aguardar,
     )  # fmt: skip
 
 
@@ -92,6 +97,11 @@ def status() -> None:
     typer.echo("fila: " + (", ".join(f"{k}: {v}" for k, v in sorted(r["por_status"].items())) or "vazia"))
     if r["erros_por_tipo"]:
         typer.echo("erros: " + ", ".join(f"{k}: {v}" for k, v in r["erros_por_tipo"].items()))
+    if r["sem_audio_premium"]:
+        typer.echo(
+            f"sem áudio só por serem do Music Premium: {r['sem_audio_premium']} "
+            "(nenhum outro provedor teve a faixa; `curator fila repetir-sem-audio` tenta de novo)"
+        )
     if r["esgotados"]:
         aviso(f"{r['esgotados']} faixa(s) esgotaram as {cfg['fila']['max_tentativas']} tentativas")
     agora = datetime.now(UTC)

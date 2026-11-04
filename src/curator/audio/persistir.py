@@ -65,7 +65,7 @@ def gravar_analise(
             vetores.gravar(con, video_id, tipo, v)
         _gravar_status(
             con, video_id, "ok", versao=versao, hash_modelos=hash_modelos, origem=origem,
-            duracao=r.duracao_s, tempo_s=tempo_s, tempos=r.tempos,
+            duracao=r.duracao_analisada_s or r.duracao_s, tempo_s=tempo_s, tempos=r.tempos,
         )  # fmt: skip
 
 

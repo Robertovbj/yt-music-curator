@@ -3,7 +3,14 @@
 import numpy as np
 
 from curator.audio.analisador import AudioInvalido, Resultado
-from curator.audio.provedores.base import Arquivo, Candidato, ErroBloqueio, ErroIndisponivel, ErroTransitorio
+from curator.audio.provedores.base import (
+    Arquivo,
+    Candidato,
+    ErroBloqueio,
+    ErroIndisponivel,
+    ErroPremium,
+    ErroTransitorio,
+)
 
 
 def resultado_falso(duracao=200.0) -> Resultado:
@@ -27,10 +34,10 @@ class AnalisadorFalso:
 
 
 class ProvedorFalso:
-    """`comportamento`: lista consumida a cada busca — 'ok', 'nada', 'bloqueio', 'indisponivel', 'erro'."""
+    """`comportamento`: lista consumida a cada busca — 'ok', 'nada', 'bloqueio', 'indisponivel', 'premium', 'erro'."""
 
-    def __init__(self, nome, comportamento, usa_rede=True, score=1.0, exato=True, duracao=200):
-        self.nome, self.usa_rede = nome, usa_rede
+    def __init__(self, nome, comportamento, usa_rede=True, score=1.0, exato=True, duracao=200, parcial=False):
+        self.nome, self.usa_rede, self.parcial = nome, usa_rede, parcial
         self.comportamento = list(comportamento)
         self.score, self.exato, self.duracao = score, exato, duracao
         self.saidas_usadas, self.arquivos = [], []
@@ -40,6 +47,8 @@ class ProvedorFalso:
         acao = self.comportamento.pop(0) if self.comportamento else "ok"
         if acao == "bloqueio":
             raise ErroBloqueio("Sign in to confirm you're not a bot")
+        if acao == "premium":
+            raise ErroPremium("This video is only available to Music Premium members")
         if acao == "indisponivel":
             raise ErroIndisponivel("Video unavailable")
         if acao == "erro":
@@ -62,4 +71,4 @@ class ProvedorFalso:
         arq = destino / "audio.opus"
         arq.write_bytes(b"\0" * 1000)
         self.arquivos.append(arq)
-        return Arquivo(arq, 1000)
+        return Arquivo(arq, 1000, parcial=self.parcial)

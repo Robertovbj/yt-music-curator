@@ -40,6 +40,7 @@ class Arquivo:
     caminho: Path
     bytes: int
     temporario: bool = True  # False para a pasta local: o worker nunca apaga
+    parcial: bool = False  # só o começo da faixa (faixas longas): a duração do arquivo não é a da faixa
 
 
 class ErroBloqueio(RuntimeError):
@@ -48,6 +49,10 @@ class ErroBloqueio(RuntimeError):
 
 class ErroIndisponivel(RuntimeError):
     """Este provedor não tem a faixa (removida, privada, região, idade): tentar o próximo provedor."""
+
+
+class ErroPremium(ErroIndisponivel):
+    """Só para assinantes do Music Premium: tenta os outros provedores; sem nenhum, a faixa fica marcada."""
 
 
 class ErroTransitorio(RuntimeError):

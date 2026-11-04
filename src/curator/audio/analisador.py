@@ -62,6 +62,9 @@ GENEROS_PERSONALIZADOS = {
 }
 
 DURACAO_MINIMA_S = 5.0
+# Medleys de 1 h quebram o RhythmExtractor ("push item into source OnsetDetectionGlobal") e pesam no EffNet.
+# Acima disso, só os primeiros minutos entram na análise; a duração total continua registrada.
+DURACAO_MAXIMA_S = 15 * 60
 
 
 class AudioInvalido(ValueError):
@@ -73,8 +76,9 @@ class Resultado:
     features: dict[str, float | str | None]
     vetores: dict[str, np.ndarray]
     rotulos: dict[str, list[str]]
-    duracao_s: float
+    duracao_s: float  # duração total do áudio (o worker compara com a da faixa)
     tempos: dict[str, float] = field(default_factory=dict)
+    duracao_analisada_s: float | None = None  # < duracao_s quando a faixa passou de DURACAO_MAXIMA_S
 
 
 def normalizar_1a9(x: float) -> float:
@@ -149,8 +153,6 @@ class Analisador:
             for nome in MODELOS_AV
         }
         self.tempocnn = es.TempoCNN(graphFilename=mp("deeptemp-k16-3"))
-        self.ritmo = es.RhythmExtractor2013(method="multifeature")
-        self.tom = es.KeyExtractor()
 
     def reamostrar(self, audio: np.ndarray, de: int, para: int, qualidade: int) -> np.ndarray:
         """Reamostrador do próprio Essentia (o mesmo do MonoLoader, usado nos exemplos oficiais dos modelos).
@@ -176,6 +178,8 @@ class Analisador:
         duracao = len(nativo) / taxa
         if duracao < DURACAO_MINIMA_S:
             raise AudioInvalido(f"áudio com {duracao:.1f} s (mínimo {DURACAO_MINIMA_S} s)")
+        if duracao > DURACAO_MAXIMA_S:
+            nativo = nativo[: int(DURACAO_MAXIMA_S * taxa)]
         audio44 = self.reamostrar(nativo, taxa, 44100, 1)
         audio16 = self.reamostrar(nativo, taxa, 16000, 4)
         audio11 = self.reamostrar(nativo, taxa, 11025, 4)
@@ -208,8 +212,10 @@ class Analisador:
         features["arousal_spread"] = (max(aro) - min(aro)) / 8.0
         etapa("musicnn_av")
 
-        bpm_r, _, conf, _, _ = self.ritmo(audio44)
-        tom, escala, forca = self.tom(audio44)
+        # Instâncias novas a cada faixa: depois de um erro interno, o RhythmExtractor reaproveitado passava a
+        # falhar em todas as faixas seguintes ("Descriptor name 'internal.bpm' of type Real not found").
+        bpm_r, _, conf, _, _ = self.es.RhythmExtractor2013(method="multifeature")(audio44)
+        tom, escala, forca = self.es.KeyExtractor()(audio44)
         bpm_t, _, _ = self.tempocnn(audio11)
         features.update(
             bpm=float(bpm_t),  # TempoCNN erra menos oitava que o RhythmExtractor
@@ -226,7 +232,8 @@ class Analisador:
         etapa("tempo_tom")
 
         vetores = {k: np.asarray(v, dtype=np.float32) for k, v in vetores.items()}
-        return Resultado(features, vetores, rotulos_saida, round(duracao, 2), tempos)
+        analisada = round(min(duracao, DURACAO_MAXIMA_S), 2)
+        return Resultado(features, vetores, rotulos_saida, round(duracao, 2), tempos, analisada)
 
 
 def decodificar(caminho: Path) -> tuple[np.ndarray, int]:

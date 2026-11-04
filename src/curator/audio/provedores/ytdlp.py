@@ -14,6 +14,7 @@ from curator.audio.provedores.base import (
     Candidato,
     ErroBloqueio,
     ErroIndisponivel,
+    ErroPremium,
     ErroTransitorio,
     FaixaAlvo,
     Saida,
@@ -24,6 +25,7 @@ log = logging.getLogger(__name__)
 _BLOQUEIO = re.compile(
     r"not a bot|confirm you.re not|HTTP Error 429|Too Many Requests|rate.?limit", re.IGNORECASE
 )
+_PREMIUM = re.compile(r"Premium members|requires (a )?(YouTube|Music) Premium", re.IGNORECASE)
 _INDISPONIVEL = re.compile(
     r"video unavailable|not available|available in your country|blocked it in your country|geo.?restrict|private video|has been removed|account .* terminated|"
     r"confirm your age|age.restricted|members.only|copyright|no video formats|requested format is not available|"
@@ -37,6 +39,8 @@ def classificar(e: Exception) -> Exception:
     texto = str(e)
     if _BLOQUEIO.search(texto):
         return ErroBloqueio(texto)
+    if _PREMIUM.search(texto):
+        return ErroPremium(texto)
     if _INDISPONIVEL.search(texto):
         return ErroIndisponivel(texto)
     return ErroTransitorio(texto)
@@ -100,6 +104,10 @@ class BaseYtDlp:
             raise classificar(e) from e
 
     def baixar(self, candidato: Candidato, destino: Path, saida: Saida | None) -> Arquivo:
+        from curator.audio.analisador import DURACAO_MAXIMA_S
+
+        if candidato.duracao_s and candidato.duracao_s > DURACAO_MAXIMA_S:
+            return self._baixar_comeco(candidato, destino, saida, DURACAO_MAXIMA_S)
         info = self._extrair(
             candidato.ref, saida, download=True, format=self.formato, outtmpl=str(destino / "audio.%(ext)s")
         )
@@ -110,6 +118,42 @@ class BaseYtDlp:
                 raise ErroTransitorio(f"yt-dlp não gerou arquivo para {candidato.ref}")
             caminho = achados[0]
         return Arquivo(caminho, caminho.stat().st_size)
+
+    def _baixar_comeco(
+        self, candidato: Candidato, destino: Path, saida: Saida | None, segundos: float
+    ) -> Arquivo:
+        """Só os primeiros `segundos` de uma faixa longa, que é o que a análise usa (um medley de 1h48 tem ~50 MB).
+
+        Um pedido HTTP com Range pelo próprio yt-dlp, e não o `download_ranges` dele: aquele passa pelo ffmpeg,
+        que não usa o proxy SOCKS da saída (e a URL do googlevideo só vale para o IP que a pediu). O arquivo
+        truncado decodifica até onde vai.
+        """
+        from yt_dlp import YoutubeDL
+        from yt_dlp.networking import Request
+
+        try:
+            with YoutubeDL(self._opcoes(saida, format=self.formato)) as ydl:
+                info = ydl.extract_info(candidato.ref, download=False)
+                duracao = info.get("duration") or candidato.duracao_s
+                total = info.get("filesize") or info.get("filesize_approx")
+                kbps = info.get("abr") or info.get("tbr") or 160
+                limite = (
+                    int(total * segundos / duracao * 1.05)
+                    if total and duracao
+                    else int(kbps * 125 * segundos * 1.1)
+                )
+                caminho = destino / f"audio.{info.get('ext') or 'webm'}"
+                pedido = Request(
+                    info["url"], headers={**(info.get("http_headers") or {}), "Range": f"bytes=0-{limite}"}
+                )
+                with ydl.urlopen(pedido) as resp, caminho.open("wb") as f:
+                    while bloco := resp.read(1 << 16):
+                        f.write(bloco)
+        except Exception as e:  # DownloadError, ExtractorError, HTTPError...
+            raise classificar(e) from e
+        if not caminho.stat().st_size:
+            raise ErroTransitorio(f"download parcial vazio para {candidato.ref}")
+        return Arquivo(caminho, caminho.stat().st_size, parcial=True)
 
     def _buscar(self, consulta: str, faixa: FaixaAlvo, saida: Saida | None) -> list[Candidato]:
         info = self._extrair(consulta, saida, download=False, extract_flat="in_playlist")
