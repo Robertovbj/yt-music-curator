@@ -53,6 +53,15 @@ def analisadas(con: sqlite3.Connection) -> list[str]:
     return [r[0] for r in con.execute("SELECT video_id FROM analises WHERE status = 'ok' ORDER BY video_id")]
 
 
+def da_biblioteca(con: sqlite3.Connection) -> list[str]:
+    """Analisadas ∩ biblioteca utilizável (sem dislikes). É a base das estatísticas (z-score), do mapa e dos
+    clusters: faixas guardadas fora da biblioteca (#59) e candidatas de recomendação não mexem nelas."""
+    from curator.banco import consultas
+
+    dentro = set(consultas.utilizaveis(con))
+    return [v for v in analisadas(con) if v in dentro]
+
+
 def hash_biblioteca(con: sqlite3.Connection) -> str:
     """Muda quando entra/sai uma análise ou ela é refeita: chave de cache e "versão do banco" das execuções."""
     h = hashlib.sha256()
@@ -132,10 +141,16 @@ def zscore(X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return Z.astype(np.float32), media, desvio
 
 
-def interpretavel(con: sqlite3.Connection, pesos: dict[str, float] | None = None) -> Matriz:
-    """Escalares + probabilidades em z-score, cada grupo com peso/√dim. Colunas nomeadas "grupo:rótulo"."""
+def interpretavel(
+    con: sqlite3.Connection, pesos: dict[str, float] | None = None, ids: list[str] | None = None
+) -> Matriz:
+    """Escalares + probabilidades em z-score, cada grupo com peso/√dim. Colunas nomeadas "grupo:rótulo".
+
+    `ids` restringe as faixas (e portanto a base do z-score)."""
     pesos = {**PESOS_PADRAO, **(pesos or {})}
     base = escalares(con)
+    if ids is not None:
+        base = base.subconjunto(ids)
     blocos, colunas = [], []
     if pesos["escalares"]:
         Z, _, _ = zscore(base.X)

@@ -131,15 +131,20 @@ def _menciona(texto_norm: str, nome_norm: str) -> bool:
 def executar(con: sqlite3.Connection, r: Receita) -> Execucao:
     validar(con, r)
     universo = _universo(con, r)
+    dislikes = consultas.com_dislike(con)
+    sem_dislike = [v for v in universo if v not in dislikes]
     analisadas = set(espacos.analisadas(con))
-    cand = [v for v in universo if v in analisadas]
-    ex = Execucao(r.hash(), espacos.hash_biblioteca(con), [], len(universo), len(universo) - len(cand), 0)
+    cand = [v for v in sem_dislike if v in analisadas]
+    ex = Execucao(r.hash(), espacos.hash_biblioteca(con), [], len(universo), len(sem_dislike) - len(cand), 0)
+    if len(sem_dislike) < len(universo):
+        ex.descartes["dislike"] = len(universo) - len(sem_dislike)
     if not cand:
         return ex
 
     meta = _metadados(con, cand)
-    esc_todas = espacos.escalares(con)  # média/desvio sobre a biblioteca analisada inteira
-    _, media, desvio = espacos.zscore(esc_todas.X)
+    esc_todas = espacos.escalares(con)
+    # média/desvio sobre a biblioteca analisada (sem dislikes nem faixas de fora): candidatas não mexem na régua
+    _, media, desvio = espacos.zscore(esc_todas.subconjunto(espacos.da_biblioteca(con)).X)
     esc = esc_todas.subconjunto(cand)
     col = {c: i for i, c in enumerate(esc.colunas)}
     probs = _Probs(con, cand)

@@ -195,5 +195,17 @@ def de_classificacao(con: sqlite3.Connection, decisoes) -> int:
     return criar(con, "classificar", list(por.values()))
 
 
+def de_dislikes(con: sqlite3.Connection) -> int:
+    """Plano que tira das playlists próprias as faixas com dislike (#61). Nunca é automático: o usuário revisa
+    e aplica. As faixas continuam no banco, com a análise."""
+    from curator.banco.consultas import dislikes_em_playlists
+
+    ops = [
+        Operacao("remover", pid, ids, motivo=dict.fromkeys(ids, "dislike no YouTube Music"))
+        for pid, ids in dislikes_em_playlists(con).items()
+    ]
+    return criar(con, "dislikes", ops, propagar_agregadoras=False)
+
+
 def de_reorganizacao(con: sqlite3.Connection, sugestoes, escopo: str) -> int:
     return criar(con, f"reorganizar:{escopo}", [o for s in sugestoes for o in s.operacoes])

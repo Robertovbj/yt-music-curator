@@ -99,7 +99,9 @@ def estatisticas() -> dict:
 
 
 def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
-    """Faixas cujo título, artista ou álbum contém o texto (sem acento/caixa). Devolve video_id para usar como semente."""
+    """Faixas cujo título, artista ou álbum contém o texto (sem acento/caixa). Devolve video_id para usar como semente.
+
+    `dislike`: o usuário não gosta; nunca use como semente nem sugira. `na_biblioteca`: curtida ou numa playlist dele."""
     con = banco()
     q = normalizar(texto)
     analisadas = set(espacos.analisadas(con))
@@ -115,7 +117,12 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
             if len(achadas) >= limite:
                 break
     meta = _faixas(con, achadas)
-    return [{**meta[v], "analisada": v in analisadas} for v in achadas]
+    biblioteca = set(consultas.biblioteca(con))
+    dislikes = consultas.com_dislike(con)
+    return [
+        {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes}
+        for v in achadas
+    ]
 
 
 def buscar_artistas(texto: str, limite: int = 20) -> list[dict]:

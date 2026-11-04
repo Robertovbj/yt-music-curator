@@ -9,6 +9,11 @@ BIBLIOTECA = """
 """
 
 
+# Faixas com dislike (#61): continuam no banco com a análise (#59), mas nunca entram em playlists geradas,
+# classificações, clusters nem recomendações.
+DISLIKES = "SELECT video_id FROM faixas WHERE avaliacao = 'dislike'"
+
+
 def _ids(con: sqlite3.Connection, sql: str, params=()) -> list[str]:
     return [r[0] for r in con.execute(sql, params)]
 
@@ -18,11 +23,33 @@ def biblioteca(con: sqlite3.Connection) -> list[str]:
     return _ids(con, f"SELECT video_id FROM ({BIBLIOTECA}) ORDER BY video_id")
 
 
+def com_dislike(con: sqlite3.Connection) -> set[str]:
+    return set(_ids(con, DISLIKES))
+
+
+def utilizaveis(con: sqlite3.Connection) -> list[str]:
+    """A biblioteca sem as faixas com dislike: o que o motor pode usar."""
+    return _ids(
+        con, f"SELECT video_id FROM ({BIBLIOTECA}) WHERE video_id NOT IN ({DISLIKES}) ORDER BY video_id"
+    )
+
+
+def dislikes_em_playlists(con: sqlite3.Connection) -> dict[str, list[str]]:
+    """playlist_id → faixas com dislike que ainda estão nela (para sugerir a remoção num plano)."""
+    out: dict[str, list[str]] = {}
+    for pid, vid in con.execute(
+        f"""SELECT DISTINCT pf.playlist_id, pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
+            WHERE p.propria = 1 AND pf.video_id IN ({DISLIKES}) ORDER BY pf.playlist_id, pf.video_id"""
+    ):
+        out.setdefault(pid, []).append(vid)
+    return out
+
+
 def nao_alocadas(con: sqlite3.Connection) -> list[str]:
     """Curtidas que não estão em nenhuma playlist própria, da curtida mais recente para a mais antiga."""
     return _ids(
         con,
-        """SELECT f.video_id FROM faixas f WHERE f.curtida = 1 AND NOT EXISTS (
+        """SELECT f.video_id FROM faixas f WHERE f.curtida = 1 AND f.avaliacao != 'dislike' AND NOT EXISTS (
                SELECT 1 FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
                WHERE p.propria = 1 AND pf.video_id = f.video_id)
            ORDER BY f.posicao_curtida""",
@@ -64,6 +91,7 @@ def estatisticas(con: sqlite3.Connection) -> dict:
         "curtidas": um("SELECT count(*) FROM faixas WHERE curtida = 1"),
         "nao_alocadas": len(nao_alocadas(con)),
         "dislikes": um("SELECT count(*) FROM faixas WHERE avaliacao = 'dislike'"),
+        "dislikes_em_playlists": sum(len(v) for v in dislikes_em_playlists(con).values()),
         "analisadas_fora_da_biblioteca": um(
             f"SELECT count(*) FROM analises WHERE status = 'ok' AND video_id NOT IN {bib}"
         ),

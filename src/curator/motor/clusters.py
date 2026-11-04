@@ -188,10 +188,12 @@ def nome_automatico(est: dict) -> str:
 
 
 def _universo(con: sqlite3.Connection, escopo: str) -> list[str]:
-    if escopo == "biblioteca":
-        from curator.banco import consultas
+    """Faixas do escopo, sem as que têm dislike (#61)."""
+    from curator.banco import consultas
 
-        return consultas.biblioteca(con)
+    if escopo == "biblioteca":
+        return consultas.utilizaveis(con)
+    dislikes = consultas.com_dislike(con)
     return [
         r[0]
         for r in con.execute(
@@ -199,6 +201,7 @@ def _universo(con: sqlite3.Connection, escopo: str) -> list[str]:
                SELECT DISTINCT video_id FROM playlist_faixas WHERE playlist_id IN (SELECT id FROM d) ORDER BY video_id""",
             (escopo,),
         )
+        if r[0] not in dislikes
     ]
 
 

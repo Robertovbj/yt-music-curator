@@ -225,6 +225,19 @@ def plano_mostrar(
     typer.echo(planos.diff_legivel(con, ops))
 
 
+@plano_app.command("dislikes")
+def plano_dislikes() -> None:
+    """Plano que tira das suas playlists as faixas com dislike (nada é aplicado sem `plano aplicar`)."""
+    con = banco()
+    try:
+        pid = planos.de_dislikes(con)
+    except ValueError:
+        typer.echo("nenhuma faixa com dislike nas suas playlists")
+        return
+    typer.echo(f"plano #{pid} criado:\n\n{planos.diff_legivel(con, planos.obter(con, pid)[1])}")
+    typer.echo(f"\npara aplicar: curator plano aplicar {pid}")
+
+
 @plano_app.command("descartar")
 def plano_descartar(plano_id: int) -> None:
     if not planos.descartar(banco(), plano_id):
