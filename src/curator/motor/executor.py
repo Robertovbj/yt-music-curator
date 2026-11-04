@@ -128,9 +128,10 @@ def _menciona(texto_norm: str, nome_norm: str) -> bool:
 # ------------------------------------------------------------------ execução
 
 
-def executar(con: sqlite3.Connection, r: Receita) -> Execucao:
+def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = None) -> Execucao:
+    """`universo` substitui o da receita (recomendações do modo lento: as candidatas analisadas)."""
     validar(con, r)
-    universo = _universo(con, r)
+    universo = _universo(con, r) if universo is None else sorted(set(universo))
     dislikes = consultas.com_dislike(con)
     sem_dislike = [v for v in universo if v not in dislikes]
     analisadas = set(espacos.analisadas(con))

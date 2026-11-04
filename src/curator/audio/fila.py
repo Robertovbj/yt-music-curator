@@ -31,6 +31,10 @@ def enfileirar_biblioteca(con: sqlite3.Connection, versao: str, hash_modelos: st
              SELECT video_id FROM analises WHERE status = 'ok' AND (versao_analisador != :v OR hash_modelos != :h))""",
         {"m": momento, "v": versao, "h": hash_modelos},
     )
+    # candidata de recomendação que virou biblioteca (curtida) passa a ter a prioridade da biblioteca
+    con.execute(
+        f"UPDATE fila_download SET prioridade = 0 WHERE prioridade != 0 AND video_id IN ({BIBLIOTECA})"
+    )
     con.execute(
         f"""INSERT INTO fila_download (video_id, status, criada_em, atualizada_em)
             SELECT b.video_id, 'pendente', :m, :m FROM ({BIBLIOTECA}) b
@@ -39,6 +43,21 @@ def enfileirar_biblioteca(con: sqlite3.Connection, versao: str, hash_modelos: st
               AND NOT (coalesce(a.status, '') = 'ok' AND a.versao_analisador = :v AND a.hash_modelos = :h)
               AND coalesce(a.status, '') != 'sem-audio'""",
         {"m": momento, "v": versao, "h": hash_modelos},
+    )
+    return con.execute("SELECT count(*) FROM fila_download").fetchone()[0] - antes
+
+
+def enfileirar_candidatas(con: sqlite3.Connection, ids: list[str], versao: str, hash_modelos: str) -> int:
+    """Candidatas de recomendação do modo lento (#67), com prioridade 1: só baixam quando não há faixa da
+    biblioteca pendente para a saída. Sem cota própria. Já analisadas (qualquer versão) ou sem áudio não entram."""
+    momento = agora_iso()
+    antes = con.execute("SELECT count(*) FROM fila_download").fetchone()[0]
+    con.executemany(
+        """INSERT INTO fila_download (video_id, status, prioridade, criada_em, atualizada_em)
+           SELECT :v, 'pendente', 1, :m, :m
+           WHERE NOT EXISTS (SELECT 1 FROM fila_download WHERE video_id = :v)
+             AND NOT EXISTS (SELECT 1 FROM analises WHERE video_id = :v AND status IN ('ok', 'sem-audio'))""",
+        [{"v": v, "m": momento} for v in ids],
     )
     return con.execute("SELECT count(*) FROM fila_download").fetchone()[0] - antes
 
@@ -62,12 +81,13 @@ def recuperar(con: sqlite3.Connection) -> int:
 
 
 def proximo(con: sqlite3.Connection, agora: datetime, max_tentativas: int) -> sqlite3.Row | None:
-    """Próximo item elegível: curtidas mais recentes primeiro, depois o resto da biblioteca."""
+    """Próximo item elegível: curtidas mais recentes primeiro, depois o resto da biblioteca, por último as
+    candidatas de recomendação (prioridade 1)."""
     return con.execute(
         """SELECT q.* FROM fila_download q JOIN faixas f USING (video_id)
            WHERE q.status IN ('pendente', 'erro') AND q.tentativas < ?
              AND (q.proxima_tentativa_em IS NULL OR q.proxima_tentativa_em <= ?)
-           ORDER BY f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1""",
+           ORDER BY q.prioridade, f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1""",
         (max_tentativas, _iso(agora)),
     ).fetchone()
 
@@ -80,7 +100,7 @@ def reservar(con: sqlite3.Connection, agora: datetime, max_tentativas: int) -> s
              SELECT q.video_id FROM fila_download q JOIN faixas f USING (video_id)
              WHERE q.status IN ('pendente', 'erro') AND q.tentativas < :max
                AND (q.proxima_tentativa_em IS NULL OR q.proxima_tentativa_em <= :agora)
-             ORDER BY f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1)
+             ORDER BY q.prioridade, f.posicao_curtida IS NULL, f.posicao_curtida, q.video_id LIMIT 1)
            RETURNING *""",
         {"m": agora_iso(), "max": max_tentativas, "agora": _iso(agora)},
     ).fetchone()
@@ -131,6 +151,10 @@ def resumo(con: sqlite3.Connection, max_tentativas: int) -> dict:
     premium = con.execute(
         "SELECT count(*) FROM fila_download WHERE status = 'sem-audio' AND tipo_erro = 'premium'"
     ).fetchone()[0]
+    candidatas = con.execute(
+        "SELECT count(*) FROM fila_download WHERE prioridade = 1 AND status IN ('pendente', 'erro')"
+    ).fetchone()[0]
     return {
         "por_status": por_status, "esgotados": esgotados, "erros_por_tipo": dict(erros), "sem_audio_premium": premium,
+        "candidatas_pendentes": candidatas,
     }  # fmt: skip
