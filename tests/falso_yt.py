@@ -26,6 +26,9 @@ class FalsoYT:
         self.radios: dict[str, list[dict]] = {}  # semente → faixas do rádio (sem a própria semente)
         self.relacionadas: dict[str, list[dict]] = {}
         self.buscas: dict[str, list[dict]] = {}  # consulta → resultados de search(filter="songs")
+        self.avaliacoes: dict[
+            str, str
+        ] = {}  # video_id → likeStatus real (botão do player); padrão INDIFFERENT
         self._seq = 0
         self.chamadas = Counter()
 
@@ -70,6 +73,19 @@ class FalsoYT:
             for t in self.radios[videoId]
         ]
         return {"tracks": tracks, "related": f"MPTRt_{videoId}" if videoId in self.relacionadas else None}
+
+    def _send_request(self, endpoint, body, *a, **k):
+        """Só o "next" cru: o botão de like do player mostra o dislike que o rádio esconde."""
+        assert endpoint == "next", endpoint
+        self.chamadas["next"] += 1
+        vid = body["videoId"]
+        botao = {
+            "likeButtonRenderer": {
+                "target": {"videoId": vid},
+                "likeStatus": self.avaliacoes.get(vid, "INDIFFERENT"),
+            }
+        }
+        return {"playerOverlays": {"playerOverlayRenderer": {"actions": [botao]}}}
 
     def get_song_related(self, browseId):
         self.chamadas["get_song_related"] += 1

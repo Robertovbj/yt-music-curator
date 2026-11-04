@@ -11,6 +11,10 @@ Modos:
 
 Sempre fora: faixas com dislike, as próprias sementes e o que já foi recomendado 3 vezes sem reação nos
 últimos 30 dias (#62). Uma recomendação anterior sem reação custa 15% do score a cada vez.
+
+Dislike fora das playlists (#60): o rádio não mostra dislike, então antes de salvar cada música nova da lista
+tem a avaliação conferida no botão de like do player; as que vierem com dislike (ou já curtidas) saem e o
+ranking é refeito.
 Mesmo snapshot de coletas + mesmo histórico → mesma lista (desempate por video_id).
 """
 
@@ -184,9 +188,9 @@ def candidatas(
             continue
         vezes = h.vezes if h else 0
         score = a.score / maior * (1 - pen) ** vezes
+        comp = {"coleta": round(a.score / maior, 6)}
         rk.itens.append(rc.ItemRecomendado(
-            vid, round(score, 6), sorted(a.fontes), len(a.sementes), vezes, conhecidas,
-            {"coleta": round(a.score / maior, 6)},
+            vid, round(score, 6), sorted(a.fontes), len(a.sementes), vezes, conhecidas, comp,
         ))  # fmt: skip
     rk.itens.sort(key=lambda i: (-i.score, i.video_id))
     for i in rk.itens:
@@ -323,11 +327,37 @@ def recomendar(
     if p.modo == "lento":
         from curator.motor import lento
 
-        return lento.iniciar(con, p, cfg, sementes, coleta_ids, texto)
-    rk = ranquear_rapido(con, p, cfg, sementes, coleta_ids)
+        return lento.iniciar(con, p, cfg, sementes, coleta_ids, texto, cli)
+    rk = conferido(con, cli, cfg, lambda: ranquear_rapido(con, p, cfg, sementes, coleta_ids))
     rid = rc.salvar(con, modo=p.modo, escopo=p.escopo, spec=pedido.spec(), sementes=sementes, coletas=coleta_ids,
                     itens=rk.itens, pedido=texto)  # fmt: skip
     return Resultado(rid, "pronta", rk.itens, sementes, rk.descartes)
+
+
+def conferido(con: sqlite3.Connection, cli, cfg: dict, ranquear, rodadas: int = 5) -> Ranking:
+    """Ranking cujas músicas novas tiveram a avaliação conferida no YT (#60). Se alguma vier com dislike ou já
+    curtida, o banco é atualizado e o ranking refeito (ela sai e entra a próxima)."""
+    from curator.coleta.sincronizar import conferir_avaliacoes
+
+    r = cfg["recomendacoes"]
+    rk = ranquear()
+    conferidas = Counter()
+    for _ in range(rodadas):
+        if cli is None or not r["conferir_avaliacao"]:
+            break
+        faltam = rc.precisa_conferir(
+            con, [i.video_id for i in rk.itens if not i.conhecida], r["conferir_validade_dias"]
+        )
+        if not faltam:
+            break
+        res = conferir_avaliacoes(con, cli, faltam)
+        conferidas.update(res.contagens)
+        if not (res.contagens.get("dislikes_novos") or res.contagens.get("likes_novos")):
+            break
+        rk = ranquear()
+    if conferidas.get("dislikes_novos"):
+        rk.descartes["dislike visto na conferência"] = conferidas["dislikes_novos"]
+    return rk
 
 
 def refazer(con: sqlite3.Connection, rid: int, cfg: dict) -> list[rc.ItemRecomendado]:

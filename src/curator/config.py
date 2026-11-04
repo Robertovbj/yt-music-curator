@@ -60,6 +60,10 @@ PADRAO: dict = {
         "analisar_top": 60,  # modo lento: quantas das melhores candidatas baixar e analisar
         "deezer_artistas": 3,  # artistas relacionados por artista-semente
         "deezer_faixas_por_artista": 3,
+        # dislike fora das playlists (#60): cada faixa recomendada é conferida no botão de like do player
+        "conferir_avaliacao": True,
+        "conferir_validade_dias": 7,
+        "conferir_por_rodada": 100,  # quantas recomendadas sem reação cada `sincronizar` confere
     },
     "pasta_local": {
         "caminho": "",

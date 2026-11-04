@@ -152,6 +152,36 @@ def itens(con: sqlite3.Connection, rid: int) -> list[dict]:
     return out
 
 
+def a_conferir(con: sqlite3.Connection, limite: int, validade_dias: float) -> list[str]:
+    """Músicas novas recomendadas, ainda sem reação, cuja avaliação não foi conferida há `validade_dias`:
+    a sincronização lê o botão de like de cada uma (#60), para um dislike dado fora das playlists contar."""
+    limiar = (datetime.now(UTC) - timedelta(days=validade_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [
+        r[0]
+        for r in con.execute(
+            f"""SELECT f.video_id FROM faixas f JOIN recomendacao_itens i USING (video_id)
+                WHERE i.conhecida = 0 AND {STATUS_SQL} = 'sem_reacao'
+                  AND (f.avaliacao_conferida_em IS NULL OR f.avaliacao_conferida_em < ?)
+                GROUP BY f.video_id ORDER BY f.avaliacao_conferida_em IS NOT NULL, f.avaliacao_conferida_em,
+                         max(i.recomendacao_id) DESC, f.video_id LIMIT ?""",
+            (limiar, limite),
+        )
+    ]
+
+
+def precisa_conferir(con: sqlite3.Connection, ids: list[str], validade_dias: float) -> list[str]:
+    limiar = (datetime.now(UTC) - timedelta(days=validade_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conferidas = {
+        r[0]
+        for i in range(0, len(ids), 900)
+        for r in con.execute(
+            f"SELECT video_id FROM faixas WHERE avaliacao_conferida_em >= ? AND video_id IN ({','.join('?' * len(ids[i : i + 900]))})",
+            (limiar, *ids[i : i + 900]),
+        )
+    }
+    return [v for v in ids if v not in conferidas]
+
+
 @dataclass
 class Historico:
     vezes: int  # recomendações anteriores (prontas) em que apareceu como nova

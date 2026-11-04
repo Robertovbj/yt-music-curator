@@ -33,9 +33,10 @@ class Resumo:
 
 # ------------------------------------------------------------------ faixas
 
-# likeStatus do ytmusicapi → avaliação. Só o `get_playlist` (e as curtidas, que são uma playlist) lê o botão
-# de like de verdade; no `get_watch_playlist` (rádio) "INDIFFERENT" pode ser um dislike, então de lá só o LIKE
-# é confiável (ver a docstring do ytmusicapi). Nada que venha do rádio desfaz um dislike.
+# likeStatus do ytmusicapi → avaliação. O `get_playlist` (e as curtidas, que são uma playlist) lê o botão de
+# like de verdade; no `get_watch_playlist` (rádio) "INDIFFERENT" pode ser um dislike, então de lá só o LIKE é
+# confiável (ver a docstring do ytmusicapi), e nada que venha do rádio desfaz um dislike. Para uma faixa fora
+# das playlists, `avaliacao_atual` lê o botão de like do player, que mostra o dislike.
 AVALIACAO = {"LIKE": "like", "DISLIKE": "dislike", "INDIFFERENT": "neutra"}
 
 
@@ -46,11 +47,48 @@ def registrar_avaliacao(
     nova = AVALIACAO.get(like_status or "")
     if nova is None or (not confiavel and nova != "like"):
         return False
+    momento = agora()
+    if confiavel:
+        con.execute("UPDATE faixas SET avaliacao_conferida_em = ? WHERE video_id = ?", (momento, video_id))
     cur = con.execute(
         "UPDATE faixas SET avaliacao = ?, avaliacao_em = ? WHERE video_id = ? AND avaliacao != ?",
-        (nova, agora(), video_id, nova),
+        (nova, momento, video_id, nova),
     )
     return cur.rowcount == 1
+
+
+def avaliacao_atual(cli: ClienteYT, video_id: str) -> str | None:
+    """LIKE, DISLIKE ou INDIFFERENT da faixa, lido do botão de like do player (endpoint "next", o mesmo do
+    `get_watch_playlist`): o único lugar fora das playlists em que o dislike aparece. O ytmusicapi não expõe
+    esse campo, por isso a chamada crua. None se a resposta não trouxer o botão."""
+    raw = cli.chamar("_send_request", "next", {"videoId": video_id, "isAudioOnly": True})
+    for a in (raw.get("playerOverlays") or {}).get("playerOverlayRenderer", {}).get("actions") or []:
+        b = a.get("likeButtonRenderer") if isinstance(a, dict) else None
+        if b and (b.get("target") or {}).get("videoId") == video_id:
+            return b.get("likeStatus")
+    return None
+
+
+def conferir_avaliacoes(con: sqlite3.Connection, cli: ClienteYT, ids: list[str]) -> Resumo:
+    """Lê a avaliação real de cada faixa (uma chamada por faixa, com a pausa do cliente)."""
+    r = Resumo()
+    for vid in ids:
+        try:
+            status = avaliacao_atual(cli, vid)
+        except Exception as e:  # uma faixa indisponível não interrompe a conferência
+            log.warning("avaliação de %s: %s", vid, e)
+            r.conta("falhas")
+            continue
+        if status is None:
+            r.conta("sem_resposta")
+            continue
+        mudou = registrar_avaliacao(con, vid, status, confiavel=True)
+        r.conta("conferidas")
+        if mudou and status == "DISLIKE":
+            r.conta("dislikes_novos")
+        elif mudou and status == "LIKE":
+            r.conta("likes_novos")
+    return r
 
 
 def gravar_faixa(con: sqlite3.Connection, t: dict, avaliacao_confiavel: bool = True) -> str | None:

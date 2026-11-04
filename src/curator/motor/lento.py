@@ -5,7 +5,8 @@
    curtidas) não baixam de novo: a análise nunca é apagada (#59).
 2. A recomendação fica "aguardando_analise" até a fila terminar; `concluir` fecha com o que já tem.
 3. Ordem final = 0,6 × motor (similaridade com as sementes analisadas, perfil-alvo e gêneros, como numa
-   receita) + 0,4 × coleta, com a mesma penalidade de repetição do modo rápido. Dislikes ficam fora.
+   receita) + 0,4 × coleta, com a mesma penalidade de repetição do modo rápido. Dislikes ficam fora: a
+   avaliação de cada candidata é conferida no YT antes de ela ir para a fila.
 """
 
 import json
@@ -97,10 +98,18 @@ def iniciar(
     sementes: list[str],
     coleta_ids: list[int],
     texto: str | None,
+    cli=None,
 ) -> rr.Resultado:
     from curator.audio import fila
 
-    pool = _escolher(con, p, cfg, sementes, coleta_ids)
+    # confere a avaliação antes de baixar: dislike visto agora não gasta download (#60)
+    pool = [
+        i.video_id
+        for i in rr.conferido(
+            con, cli, cfg,
+            lambda: rr.Ranking(rr.candidatas(con, p, cfg, sementes, coleta_ids).itens[: cfg["recomendacoes"]["analisar_top"]]),
+        ).itens
+    ]  # fmt: skip
     faltam = pendentes(con, pool, cfg["fila"]["max_tentativas"])
     fila.enfileirar_candidatas(con, faltam, *_versao())
     rid = rc.salvar(con, modo="lento", escopo=p.escopo, spec=p.spec(), sementes=sementes, coletas=coleta_ids,
