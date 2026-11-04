@@ -31,6 +31,7 @@ from curator.audio.provedores.base import (
     Candidato,
     ErroBloqueio,
     ErroIndisponivel,
+    ErroPremium,
     FaixaAlvo,
     ProvedorAudio,
     Saida,
@@ -238,6 +239,7 @@ class Worker:
         faixa = carregar_faixa(self.con, vid)
         tentados: list[str] = json.loads(item["provedores_tentados"])
         usou_rede = False
+        premium: list[str] = []  # provedores que só tinham a faixa para assinantes do Music Premium
         for nome, prov in self.provedores.items():
             if nome in tentados:
                 continue
@@ -257,6 +259,8 @@ class Worker:
                 return "bloqueio", usou_rede
             except (ErroIndisponivel, AudioInvalido) as e:
                 log.info("%s: %s não tem a faixa (%s)", faixa.titulo, nome, _resumir(e))
+                if isinstance(e, ErroPremium):
+                    premium.append(nome)
                 status = None
             except Exception as e:
                 log.warning("%s: erro em %s (%s); nova tentativa mais tarde", faixa.titulo, nome, _resumir(e))
@@ -282,9 +286,15 @@ class Worker:
             tentados.append(nome)
             fila.marcar(self.con, vid, "pendente", provedores_tentados=tentados)
 
-        gravar_falha(self.con, vid, "sem-audio", f"nenhum provedor teve a faixa ({', '.join(tentados)})")
-        fila.marcar(self.con, vid, "sem-audio", provedores_tentados=tentados)
-        log.info("%s: sem áudio em nenhum provedor", faixa.titulo)
+        motivo = f"nenhum provedor teve a faixa ({', '.join(tentados)})"
+        if premium:
+            motivo = f"só para assinantes do Music Premium ({', '.join(premium)}); {motivo}"
+        gravar_falha(self.con, vid, "sem-audio", motivo)
+        fila.marcar(
+            self.con, vid, "sem-audio", provedores_tentados=tentados,
+            tipo_erro="premium" if premium else None, ultimo_erro=motivo if premium else None,
+        )  # fmt: skip
+        log.info("%s: sem áudio em nenhum provedor%s", faixa.titulo, " (Music Premium)" if premium else "")
         return "sem_audio", usou_rede
 
     def _tentar(self, faixa: FaixaAlvo, nome: str, prov: ProvedorAudio, saida: Saida | None) -> str | None:

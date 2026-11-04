@@ -14,6 +14,7 @@ from curator.audio.provedores.base import (
     Candidato,
     ErroBloqueio,
     ErroIndisponivel,
+    ErroPremium,
     ErroTransitorio,
     FaixaAlvo,
     Saida,
@@ -24,6 +25,7 @@ log = logging.getLogger(__name__)
 _BLOQUEIO = re.compile(
     r"not a bot|confirm you.re not|HTTP Error 429|Too Many Requests|rate.?limit", re.IGNORECASE
 )
+_PREMIUM = re.compile(r"Premium members|requires (a )?(YouTube|Music) Premium", re.IGNORECASE)
 _INDISPONIVEL = re.compile(
     r"video unavailable|not available|available in your country|blocked it in your country|geo.?restrict|private video|has been removed|account .* terminated|"
     r"confirm your age|age.restricted|members.only|copyright|no video formats|requested format is not available|"
@@ -37,6 +39,8 @@ def classificar(e: Exception) -> Exception:
     texto = str(e)
     if _BLOQUEIO.search(texto):
         return ErroBloqueio(texto)
+    if _PREMIUM.search(texto):
+        return ErroPremium(texto)
     if _INDISPONIVEL.search(texto):
         return ErroIndisponivel(texto)
     return ErroTransitorio(texto)

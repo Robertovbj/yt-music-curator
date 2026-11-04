@@ -106,6 +106,22 @@ def test_indisponivel_cai_para_o_proximo_provedor(con, cfg):
     ] == ("youtube_busca", 0.9)
 
 
+def test_premium_tenta_a_busca_e_sem_alternativa_fica_marcado(con, cfg):
+    yt = ProvedorFalso("youtube_music", ["premium", "premium"])
+    busca = ProvedorFalso("youtube_busca", ["ok", "nada"], score=0.9, exato=False)
+    w, _ = worker(con, cfg, [yt, busca])
+    w.rodar(limite=2)
+    assert status(con, "a") == "ok"  # achou a mesma música em outro vídeo
+    assert status(con, "b") == "sem-audio"
+    tipo, erro = con.execute(
+        "SELECT tipo_erro, ultimo_erro FROM fila_download WHERE video_id = 'b'"
+    ).fetchone()
+    assert tipo == "premium" and "Music Premium" in erro
+    assert "Music Premium" in con.execute("SELECT erro FROM analises WHERE video_id = 'b'").fetchone()[0]
+    assert fila.resumo(con, 5)["sem_audio_premium"] == 1
+    assert con.execute("SELECT falhas FROM proxies WHERE nome = 'direta'").fetchone()[0] == 0
+
+
 def test_candidato_abaixo_do_limiar_nao_e_analisado(con, cfg):
     busca = ProvedorFalso("youtube_busca", ["ok"], score=0.5, exato=False)
     an = AnalisadorFalso()

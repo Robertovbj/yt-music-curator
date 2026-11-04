@@ -5,7 +5,13 @@ import pytest
 
 from curator.audio import provedores
 from curator.audio.provedores.bandcamp import Bandcamp, ler_resultados
-from curator.audio.provedores.base import ErroBloqueio, ErroIndisponivel, ErroTransitorio, FaixaAlvo
+from curator.audio.provedores.base import (
+    ErroBloqueio,
+    ErroIndisponivel,
+    ErroPremium,
+    ErroTransitorio,
+    FaixaAlvo,
+)
 from curator.audio.provedores.pasta_local import PastaLocal, indexar
 from curator.audio.provedores.ytdlp import YouTubeMusic, classificar
 from curator.banco.conexao import abrir
@@ -29,6 +35,10 @@ from curator.config import carregar_config
         (
             "ERROR: [youtube] abc: The uploader has not made this video available in your country",
             ErroIndisponivel,
+        ),
+        (
+            "ERROR: [youtube] Mm5cKROFato: This video is only available to Music Premium members",
+            ErroPremium,
         ),
         ("ERROR: unable to download video data: HTTP Error 403: Forbidden", ErroTransitorio),
         ("ERROR: [Errno -3] Temporary failure in name resolution", ErroTransitorio),

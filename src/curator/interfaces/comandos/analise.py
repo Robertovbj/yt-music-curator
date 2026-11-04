@@ -97,6 +97,11 @@ def status() -> None:
     typer.echo("fila: " + (", ".join(f"{k}: {v}" for k, v in sorted(r["por_status"].items())) or "vazia"))
     if r["erros_por_tipo"]:
         typer.echo("erros: " + ", ".join(f"{k}: {v}" for k, v in r["erros_por_tipo"].items()))
+    if r["sem_audio_premium"]:
+        typer.echo(
+            f"sem áudio só por serem do Music Premium: {r['sem_audio_premium']} "
+            "(nenhum outro provedor teve a faixa; `curator fila repetir-sem-audio` tenta de novo)"
+        )
     if r["esgotados"]:
         aviso(f"{r['esgotados']} faixa(s) esgotaram as {cfg['fila']['max_tentativas']} tentativas")
     agora = datetime.now(UTC)

@@ -51,6 +51,10 @@ class ErroIndisponivel(RuntimeError):
     """Este provedor não tem a faixa (removida, privada, região, idade): tentar o próximo provedor."""
 
 
+class ErroPremium(ErroIndisponivel):
+    """Só para assinantes do Music Premium: tenta os outros provedores; sem nenhum, a faixa fica marcada."""
+
+
 class ErroTransitorio(RuntimeError):
     """Rede, timeout, 403 avulso: tentar a mesma faixa mais tarde, com backoff."""
 
