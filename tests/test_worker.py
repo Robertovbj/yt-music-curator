@@ -1,9 +1,10 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from curator.audio import fila
-from curator.audio.worker import Worker
+from curator.audio.worker import ESPERA_TRAVA_S, MAX_TRAVAS_SEGUIDAS, Worker
 from curator.config import caminhos, carregar_config
 from tests.falso_audio import AnalisadorFalso, ProvedorFalso
 from tests.falso_yt import biblioteca_exemplo
@@ -354,3 +355,60 @@ def test_aguardar_dorme_ate_a_quarentena_acabar_e_continua(con, cfg):
 def test_sem_aguardar_continua_parando(con, cfg):
     w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["bloqueio"])])
     assert w.rodar().motivo_parada == "todas as saídas em quarentena ou sem cota"
+
+
+# ------------------------------------------------------------------ banco travado por outra conexão
+
+
+def _trava_uma_vez(monkeypatch, modulo, nome):
+    original, chamadas = getattr(modulo, nome), []
+
+    def falso(*a, **kw):
+        chamadas.append(1)
+        if len(chamadas) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return original(*a, **kw)
+
+    monkeypatch.setattr(modulo, nome, falso)
+
+
+def test_trava_ao_reservar_espera_e_continua(con, cfg, monkeypatch):
+    _trava_uma_vez(monkeypatch, fila, "reservar")
+    w, esperas = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok", "ok"])])
+    rel = w.rodar(limite=2)
+    assert rel.contagem == {"ok": 2}  # a vaga da tentativa travada foi devolvida
+    assert esperas[0] == ESPERA_TRAVA_S
+
+
+def test_trava_no_meio_da_faixa_devolve_a_fila_sem_culpar_a_saida(con, cfg, monkeypatch):
+    from curator.audio import proxies
+
+    _trava_uma_vez(monkeypatch, proxies, "registrar_sucesso")
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok", "ok"])])
+    rel = w.rodar(limite=1)
+    assert rel.contagem == {"ok": 1}
+    falhas = con.execute("SELECT falhas FROM proxies WHERE nome = 'direta'").fetchone()[0]
+    reservadas = con.execute("SELECT COUNT(*) FROM fila_download WHERE status IN ('baixando', 'analisando')")
+    assert falhas == 0 and reservadas.fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM fila_download WHERE tentativas > 0").fetchone()[0] == 0
+
+
+def test_erro_do_banco_que_nao_e_trava_continua_parando(con, cfg, monkeypatch):
+    def quebrado(*a, **kw):
+        raise sqlite3.OperationalError("no such table: fila_download")
+
+    monkeypatch.setattr(fila, "reservar", quebrado)
+    w, _ = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok"])])
+    with pytest.raises(sqlite3.OperationalError):
+        w.rodar()
+
+
+def test_travas_seguidas_demais_param_o_worker(con, cfg, monkeypatch):
+    def sempre(*a, **kw):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(fila, "reservar", sempre)
+    w, esperas = worker(con, cfg, [ProvedorFalso("youtube_music", ["ok"])])
+    with pytest.raises(sqlite3.OperationalError):
+        w.rodar()
+    assert len(esperas) == MAX_TRAVAS_SEGUIDAS

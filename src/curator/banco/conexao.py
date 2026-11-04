@@ -69,6 +69,7 @@ def abrir(caminho: Path | str, migracoes: list[Migracao] | None = None) -> sqlit
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")
-    con.execute("PRAGMA busy_timeout = 5000")
+    # as threads do worker paralelo e a CLI dividem o banco; com a máquina em swap uma escrita passa de 5 s
+    con.execute("PRAGMA busy_timeout = 30000")
     migrar(con, migracoes)
     return con

@@ -15,6 +15,7 @@ import json
 import logging
 import random
 import signal
+import sqlite3
 import tempfile
 import threading
 import time
@@ -40,6 +41,8 @@ from curator.audio.provedores.base import (
 log = logging.getLogger(__name__)
 
 ESPERA_MAXIMA = timedelta(hours=26)  # no modo aguardar, nunca dorme mais que isso de uma vez
+ESPERA_TRAVA_S = 30  # banco travado por outra conexão: espera e retoma, em vez de a thread morrer
+MAX_TRAVAS_SEGUIDAS = 10
 
 
 class ErroAnalise(RuntimeError):
@@ -176,6 +179,7 @@ class Worker:
             proxies.sincronizar_config(self.con, self.cfg)
             if n := fila.recuperar(self.con):
                 log.info("%d item(ns) interrompido(s) voltaram para a fila", n)
+        travas = 0
         while True:
             if self.parar:
                 rel.motivo_parada = "interrompido"
@@ -187,12 +191,24 @@ class Worker:
             if vaga is None:
                 rel.motivo_parada = f"limite de {self.comp.limite} faixa(s)"
                 break
-            item = fila.reservar(self.con, self.relogio(), self.max_tentativas)
-            if item is None:
+            item = None
+            try:
+                item = fila.reservar(self.con, self.relogio(), self.max_tentativas)
+                if item is None:
+                    self.comp.devolver_vaga()
+                    break
+                inicio = time.perf_counter()
+                resultado, usou_rede = self._processar(item)
+            except sqlite3.OperationalError as e:
+                if not _travado(e) or travas >= MAX_TRAVAS_SEGUIDAS:
+                    raise
+                travas += 1
                 self.comp.devolver_vaga()
-                break
-            inicio = time.perf_counter()
-            resultado, usou_rede = self._processar(item)
+                self._devolver(item)
+                log.warning("saída %s: banco travado (%s); retomando em %d s", self.saida, e, ESPERA_TRAVA_S)
+                self.dormir(ESPERA_TRAVA_S)
+                continue
+            travas = 0
             if resultado in ("sem_saida", "bloqueio"):
                 self.comp.devolver_vaga()  # não conta para o limite
             if resultado == "sem_saida" and aguardar and self._aguardar_liberacao(ate):
@@ -227,6 +243,15 @@ class Worker:
         return self.rng.uniform(
             p.get("intervalo_min_s", f["intervalo_min_s"]), p.get("intervalo_max_s", f["intervalo_max_s"])
         )
+
+    def _devolver(self, item) -> None:
+        """Depois de uma trava do banco: a faixa reservada volta a pendente (se o banco deixar)."""
+        if item is None:
+            return
+        try:
+            fila.marcar(self.con, item["video_id"], "pendente")
+        except sqlite3.OperationalError:
+            log.warning("%s ficou reservada; volta à fila no próximo lote", item["video_id"])
 
     def _aguardar_liberacao(self, ate: datetime | None) -> bool:
         """Modo serviço: dorme até a saída sair da quarentena ou a cota virar. False = desistir (parada/limite)."""
@@ -270,6 +295,8 @@ class Worker:
                     premium.append(nome)
                 status = None
             except Exception as e:
+                if isinstance(e, sqlite3.OperationalError) and _travado(e):
+                    raise  # culpa do banco, não da saída nem da faixa: `rodar` devolve à fila e espera
                 log.warning("%s: erro em %s (%s); nova tentativa mais tarde", faixa.titulo, nome, _resumir(e))
                 if saida and isinstance(e, ErroAnalise):
                     proxies.registrar_sucesso(self.con, saida.nome)  # o download deu certo
@@ -339,6 +366,10 @@ class Worker:
             VERSAO_ANALISADOR, self.analisador.hash_modelos, round(time.perf_counter() - inicio, 2),
         )  # fmt: skip
         return "ok"
+
+
+def _travado(e: sqlite3.OperationalError) -> bool:
+    return "locked" in str(e) or "busy" in str(e)
 
 
 def _resumir(e: Exception) -> str:
