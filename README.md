@@ -131,13 +131,13 @@ O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável) e a vi
 O servidor MCP deixa o Claude montar receitas, classificar e sugerir reorganizações conversando com você. Ele nunca aplica nada: no máximo cria planos.
 
 ```sh
-claude mcp add yt-music-curator -- uv --directory ~/Projects/Pessoal/yt-music-curator run --extra organizar curator mcp
+claude mcp add yt-music-curator -- uv --directory /caminho/para/yt-music-curator run --extra organizar curator mcp
 ```
 
 No Claude Desktop, o equivalente em `claude_desktop_config.json`:
 
 ```json
-{"mcpServers": {"yt-music-curator": {"command": "uv", "args": ["--directory", "/home/USUARIO/Projects/Pessoal/yt-music-curator", "run", "--extra", "organizar", "curator", "mcp"]}}}
+{"mcpServers": {"yt-music-curator": {"command": "uv", "args": ["--directory", "/caminho/para/yt-music-curator", "run", "--extra", "organizar", "curator", "mcp"]}}}
 ```
 
 ### Aplicar planos no YouTube Music
