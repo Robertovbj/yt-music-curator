@@ -37,6 +37,7 @@ CONTAGENS = {
     "fila_pendente": "SELECT count(*) FROM fila_download WHERE status IN ('pendente', 'erro')",
     "receitas": "SELECT count(*) FROM receitas",
     "planos": "SELECT count(*) FROM planos",
+    "recomendacoes": "SELECT count(*) FROM recomendacoes",
 }
 
 

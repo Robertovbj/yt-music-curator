@@ -81,9 +81,9 @@ def perfis(con: sqlite3.Connection, k: int = K, alfa: float = ALFA, percentil: f
            sem: set[str] | None = None) -> tuple[dict[str, Perfil], list[tuple[str, int]]]:  # fmt: skip
     """Perfil de cada playlist própria com membros analisados suficientes. `sem` tira faixas (avaliação)."""
     emb = espacos.embeddings(con)
-    sem = sem or set()
+    sem = (sem or set()) | consultas.com_dislike(con)  # dislikes não puxam o centroide
     pl = con.execute(
-        "SELECT playlist_id, titulo, mae_id FROM playlists WHERE propria = 1 ORDER BY playlist_id"
+        "SELECT playlist_id, titulo, mae_id FROM playlists WHERE propria = 1 AND descobertas = 0 ORDER BY playlist_id"
     ).fetchall()
     filhas = defaultdict(list)
     for p in pl:
@@ -133,7 +133,7 @@ def _raizes(con: sqlite3.Connection, mae: str | None) -> list[str]:
     return [
         r[0]
         for r in con.execute(
-            "SELECT playlist_id FROM playlists WHERE propria = 1 AND mae_id IS NULL ORDER BY playlist_id"
+            "SELECT playlist_id FROM playlists WHERE propria = 1 AND descobertas = 0 AND mae_id IS NULL ORDER BY playlist_id"
         )
     ]
 
@@ -169,6 +169,8 @@ def classificar(con: sqlite3.Connection, ids: list[str] | None = None, mae: str 
                 k: int = K, alfa: float = ALFA, percentil: float = PERCENTIL) -> Classificacao:  # fmt: skip
     """Por padrão, as curtidas não alocadas. Faixas sem análise ficam de fora (e são contadas)."""
     ids = consultas.nao_alocadas(con) if ids is None else ids
+    dislikes = consultas.com_dislike(con)
+    ids = [v for v in ids if v not in dislikes]
     emb = espacos.embeddings(con)
     com = [v for v in ids if v in emb.indice]
     ps, frias = perfis(con, k, alfa, percentil)

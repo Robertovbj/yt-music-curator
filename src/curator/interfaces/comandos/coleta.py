@@ -30,6 +30,14 @@ def sincronizar(
     imprimir_resumo(
         "playlists", sincronizar_playlists(con, cli, forcar=forcar, ttl_h=cfg["playlists"]["ttl_h"])
     )
+    from curator.coleta.sincronizar import conferir_avaliacoes
+    from curator.motor.recomendacoes import a_conferir
+
+    rec = cfg["recomendacoes"]
+    if rec["conferir_avaliacao"] and (
+        ids := a_conferir(con, rec["conferir_por_rodada"], rec["conferir_validade_dias"])
+    ):
+        imprimir_resumo("avaliações das recomendadas", conferir_avaliacoes(con, cli, ids))
     if not sem_metadados:
         imprimir_resumo(
             "álbuns", completar_metadados(con, cli, ttl_dias=cfg["metadados"]["ttl_dias"], forcar=forcar)

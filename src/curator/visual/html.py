@@ -23,7 +23,7 @@ MAX_GENEROS = 11
 
 
 def dados(con: sqlite3.Connection) -> dict:
-    ids = espacos.analisadas(con)
+    ids = espacos.da_biblioteca(con)
     pos = {v: i for i, v in enumerate(ids)}
     meta = {
         r["video_id"]: r

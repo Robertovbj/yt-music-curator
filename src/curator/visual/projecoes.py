@@ -13,10 +13,11 @@ from curator.banco.conexao import transacao
 from curator.motor import espacos
 from curator.motor.clusters import Parametros, reduzir
 
+# Só a biblioteca utilizável (#61): faixas guardadas fora dela e candidatas de recomendação não entram no mapa.
 ESPACOS: dict[str, Callable[[sqlite3.Connection], espacos.Matriz]] = {
-    "effnet": lambda con: espacos.embeddings(con, "effnet_emb"),
-    "musicnn": lambda con: espacos.embeddings(con, "musicnn_emb"),
-    "interpretavel": lambda con: espacos.interpretavel(con),
+    "effnet": lambda con: espacos.embeddings(con, "effnet_emb").subconjunto(espacos.da_biblioteca(con)),
+    "musicnn": lambda con: espacos.embeddings(con, "musicnn_emb").subconjunto(espacos.da_biblioteca(con)),
+    "interpretavel": lambda con: espacos.interpretavel(con, ids=espacos.da_biblioteca(con)),
 }
 
 # Para olhar, um pouco de espaço entre os pontos ajuda (no clustering min_dist é 0).

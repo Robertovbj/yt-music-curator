@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from itertools import combinations
 
+from curator.banco import consultas
 from curator.motor import espacos
 from curator.motor.clusters import Cluster, _universo, jaccard, sobreposicoes
 from curator.motor.planos import Operacao
@@ -32,7 +33,7 @@ def _playlists(con: sqlite3.Connection, escopo: str, analisadas: set[str]) -> di
     universo = set(_universo(con, escopo)) if escopo != "biblioteca" else None
     out = {}
     for pid, titulo in con.execute(
-        "SELECT playlist_id, titulo FROM playlists WHERE propria = 1 ORDER BY playlist_id"
+        "SELECT playlist_id, titulo FROM playlists WHERE propria = 1 AND descobertas = 0 ORDER BY playlist_id"
     ):
         membros = {
             r[0] for r in con.execute("SELECT video_id FROM playlist_faixas WHERE playlist_id = ?", (pid,))
@@ -45,7 +46,7 @@ def _playlists(con: sqlite3.Connection, escopo: str, analisadas: set[str]) -> di
 def sugerir(
     con: sqlite3.Connection, cs: list[Cluster], escopo: str = "biblioteca", jaccard_fusao: float = 0.6
 ) -> list[Sugestao]:
-    analisadas = set(espacos.analisadas(con))
+    analisadas = set(espacos.analisadas(con)) - consultas.com_dislike(con)
     pls = _playlists(con, escopo, analisadas)
     out: list[Sugestao] = []
 

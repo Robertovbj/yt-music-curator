@@ -47,6 +47,28 @@ PADRAO: dict = {
         "limiar_casamento": 0.82,
         "tolerancia_duracao_s": 3,
     },
+    "recomendacoes": {  # ADR-13
+        "fontes": ["yt_radio", "yt_related", "deezer"],
+        "pesos_fontes": {"yt_radio": 1.0, "yt_related": 0.8, "deezer": 0.6},
+        "max_sementes": 5,  # por playlist/cluster/artista
+        "cache_h": 12,  # coleta da mesma semente reaproveitada por este tempo; depois, rádio novo
+        "tamanho": 30,
+        "max_por_artista": 2,
+        "penalidade_repeticao": 0.15,  # por recomendação anterior sem reação (#62)
+        "max_repeticoes": 3,  # depois disso, fora por `pausa_dias`
+        "pausa_dias": 30,
+        "analisar_top": 60,  # modo lento: quantas das melhores candidatas baixar e analisar
+        "deezer_artistas": 3,  # artistas relacionados por artista-semente
+        "deezer_faixas_por_artista": 3,
+        # dislike fora das playlists (#60): cada faixa recomendada é conferida no botão de like do player
+        "conferir_avaliacao": True,
+        "conferir_validade_dias": 7,
+        "conferir_por_rodada": 100,  # quantas recomendadas sem reação cada `sincronizar` confere
+        # penalidade por parecer com o que levou dislike (#61)
+        "dislike_peso_artista": 0.5,  # × fração de dislikes entre as faixas avaliadas do artista
+        "dislike_peso_som": 0.5,  # quando a vizinha mais parecida (embedding) é um dislike
+        "dislike_margem_som": 0.1,
+    },
     "pasta_local": {
         "caminho": "",
     },

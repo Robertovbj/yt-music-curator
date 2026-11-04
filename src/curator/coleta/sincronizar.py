@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from curator.banco.conexao import agora, transacao
+from curator.banco.consultas import BIBLIOTECA
 from curator.coleta.cliente import ClienteYT
 from curator.texto import id_artista
 
@@ -32,9 +33,68 @@ class Resumo:
 
 # ------------------------------------------------------------------ faixas
 
+# likeStatus do ytmusicapi → avaliação. O `get_playlist` (e as curtidas, que são uma playlist) lê o botão de
+# like de verdade; no `get_watch_playlist` (rádio) "INDIFFERENT" pode ser um dislike, então de lá só o LIKE é
+# confiável (ver a docstring do ytmusicapi), e nada que venha do rádio desfaz um dislike. Para uma faixa fora
+# das playlists, `avaliacao_atual` lê o botão de like do player, que mostra o dislike.
+AVALIACAO = {"LIKE": "like", "DISLIKE": "dislike", "INDIFFERENT": "neutra"}
 
-def gravar_faixa(con: sqlite3.Connection, t: dict) -> str | None:
-    """Insere ou atualiza uma faixa do ytmusicapi; devolve o video_id (None se indisponível)."""
+
+def registrar_avaliacao(
+    con: sqlite3.Connection, video_id: str, like_status: str | None, confiavel: bool = True
+) -> bool:
+    """Grava a avaliação vista no YT; devolve True se mudou. Com `confiavel=False`, só aceita LIKE."""
+    nova = AVALIACAO.get(like_status or "")
+    if nova is None or (not confiavel and nova != "like"):
+        return False
+    momento = agora()
+    if confiavel:
+        con.execute("UPDATE faixas SET avaliacao_conferida_em = ? WHERE video_id = ?", (momento, video_id))
+    cur = con.execute(
+        "UPDATE faixas SET avaliacao = ?, avaliacao_em = ? WHERE video_id = ? AND avaliacao != ?",
+        (nova, momento, video_id, nova),
+    )
+    return cur.rowcount == 1
+
+
+def avaliacao_atual(cli: ClienteYT, video_id: str) -> str | None:
+    """LIKE, DISLIKE ou INDIFFERENT da faixa, lido do botão de like do player (endpoint "next", o mesmo do
+    `get_watch_playlist`): o único lugar fora das playlists em que o dislike aparece. O ytmusicapi não expõe
+    esse campo, por isso a chamada crua. None se a resposta não trouxer o botão."""
+    raw = cli.chamar("_send_request", "next", {"videoId": video_id, "isAudioOnly": True})
+    for a in (raw.get("playerOverlays") or {}).get("playerOverlayRenderer", {}).get("actions") or []:
+        b = a.get("likeButtonRenderer") if isinstance(a, dict) else None
+        if b and (b.get("target") or {}).get("videoId") == video_id:
+            return b.get("likeStatus")
+    return None
+
+
+def conferir_avaliacoes(con: sqlite3.Connection, cli: ClienteYT, ids: list[str]) -> Resumo:
+    """Lê a avaliação real de cada faixa (uma chamada por faixa, com a pausa do cliente)."""
+    r = Resumo()
+    for vid in ids:
+        try:
+            status = avaliacao_atual(cli, vid)
+        except Exception as e:  # uma faixa indisponível não interrompe a conferência
+            log.warning("avaliação de %s: %s", vid, e)
+            r.conta("falhas")
+            continue
+        if status is None:
+            r.conta("sem_resposta")
+            continue
+        mudou = registrar_avaliacao(con, vid, status, confiavel=True)
+        r.conta("conferidas")
+        if mudou and status == "DISLIKE":
+            r.conta("dislikes_novos")
+        elif mudou and status == "LIKE":
+            r.conta("likes_novos")
+    return r
+
+
+def gravar_faixa(con: sqlite3.Connection, t: dict, avaliacao_confiavel: bool = True) -> str | None:
+    """Insere ou atualiza uma faixa do ytmusicapi; devolve o video_id (None se indisponível).
+
+    `avaliacao_confiavel=False` para respostas do rádio (ver AVALIACAO)."""
     video_id = t.get("videoId")
     if not video_id:
         return None
@@ -83,6 +143,7 @@ def gravar_faixa(con: sqlite3.Connection, t: dict) -> str | None:
             "INSERT OR IGNORE INTO faixa_artistas (video_id, artista_id, ordem) VALUES (?, ?, ?)",
             (video_id, a["id"], ordem),
         )
+    registrar_avaliacao(con, video_id, t.get("likeStatus"), avaliacao_confiavel)
     return video_id
 
 
@@ -103,6 +164,15 @@ def sincronizar_curtidas(con: sqlite3.Connection, cli: ClienteYT) -> Resumo:
         con.executemany(
             "UPDATE faixas SET curtida = 1, posicao_curtida = ? WHERE video_id = ?",
             [(i, vid) for i, vid in enumerate(agora_ids, start=1)],
+        )
+        # descurtida: deixa de ser "like" (se virou dislike, a playlist em que ela estiver diz)
+        con.execute(
+            "UPDATE faixas SET avaliacao = 'neutra', avaliacao_em = ? WHERE avaliacao = 'like' AND curtida = 0",
+            (agora(),),
+        )
+        con.execute(
+            "UPDATE faixas SET avaliacao = 'like', avaliacao_em = ? WHERE curtida = 1 AND avaliacao != 'like'",
+            (agora(),),
         )
     novos = set(agora_ids)
     r.conta("total", len(novos))
@@ -254,16 +324,20 @@ def completar_metadados(
     momento = datetime.now(UTC)
     vencido = (momento - timedelta(days=ttl_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
     agora_s = momento.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # só álbuns da biblioteca: as candidatas de recomendação (ADR-13) não geram buscas a cada sincronização
+    da_biblioteca = f"album_id IN (SELECT album_id FROM faixas WHERE video_id IN ({BIBLIOTECA}))"
     filtro = (
-        ""
+        f"WHERE {da_biblioteca}"
         if forcar
-        else "WHERE (metadados_em IS NULL OR metadados_em < ?) AND (proxima_tentativa_em IS NULL OR proxima_tentativa_em <= ?)"
+        else f"WHERE {da_biblioteca} AND (metadados_em IS NULL OR metadados_em < ?) "
+        "AND (proxima_tentativa_em IS NULL OR proxima_tentativa_em <= ?)"
     )
     pendentes = con.execute(
         f"SELECT album_id, titulo, tentativas FROM albuns {filtro} ORDER BY album_id",
         () if forcar else (vencido, agora_s),
     ).fetchall()
-    r.conta("em_cache", con.execute("SELECT count(*) FROM albuns").fetchone()[0] - len(pendentes))
+    total = con.execute(f"SELECT count(*) FROM albuns WHERE {da_biblioteca}").fetchone()[0]
+    r.conta("em_cache", total - len(pendentes))
 
     for a in pendentes:
         try:

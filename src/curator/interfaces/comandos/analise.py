@@ -102,6 +102,11 @@ def status() -> None:
             f"sem áudio só por serem do Music Premium: {r['sem_audio_premium']} "
             "(nenhum outro provedor teve a faixa; `curator fila repetir-sem-audio` tenta de novo)"
         )
+    if r["candidatas_pendentes"]:
+        typer.echo(
+            f"candidatas de recomendação (modo lento) na fila: {r['candidatas_pendentes']} "
+            "(só baixam depois da biblioteca)"
+        )
     if r["esgotados"]:
         aviso(f"{r['esgotados']} faixa(s) esgotaram as {cfg['fila']['max_tentativas']} tentativas")
     agora = datetime.now(UTC)

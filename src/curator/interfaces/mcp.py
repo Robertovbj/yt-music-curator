@@ -36,6 +36,15 @@ Você organiza a biblioteca do YouTube Music do usuário. Fluxo para um pedido d
    Para pedidos parecidos com um exemplo de exemplos_de_receitas, parta do exemplo e mude só o que o pedido exige.
 5. Só crie plano (criar_plano_*) se o usuário pedir. NUNCA diga que algo foi aplicado no YouTube Music: a aplicação
    é feita pelo usuário com `curator plano aplicar`.
+RECOMENDAÇÕES (músicas que o usuário ainda não curtiu; veja exemplos_de_recomendacoes):
+- Antes de chamar qualquer coisa, saiba (1) o ESCOPO: só curtidas (receita), só músicas novas (recomendar_novas)
+  ou misturar (recomendar_misturando_curtidas, SÓ se o usuário pediu para misturar); e (2) o MODO: rápido (sem
+  baixar nada, em segundos) ou lento (baixa e analisa as candidatas; leva horas, o worker precisa rodar).
+- Na MENOR dúvida sobre escopo ou modo, PERGUNTE ao usuário antes de chamar. "Me recomende uma playlist pra
+  dirigir" não diz o escopo: pergunte. "Parecidas com a música X / a playlist Y" = músicas novas.
+- Recomendações NUNCA entram nas playlists das curtidas: criar_plano_da_recomendacao cria uma playlist nova;
+  playlist_destino + permitir_novas só quando o usuário pediu isso com todas as letras.
+- O histórico (historico_recomendacoes) mostra o que já foi sugerido e o que virou curtida ou dislike.
 Outros pedidos: "onde colocar as não alocadas" → classificar_nao_alocadas; "sugira playlists / reorganize" →
 sugerir_reorganizacao (dê nomes melhores com renomear_cluster). Faixas ainda não analisadas ficam de fora de tudo
 (o worker analisa ~500 por dia); diga isso quando 'sem_analise' for grande.
@@ -99,7 +108,9 @@ def estatisticas() -> dict:
 
 
 def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
-    """Faixas cujo título, artista ou álbum contém o texto (sem acento/caixa). Devolve video_id para usar como semente."""
+    """Faixas cujo título, artista ou álbum contém o texto (sem acento/caixa). Devolve video_id para usar como semente.
+
+    `dislike`: o usuário não gosta; nunca use como semente nem sugira. `na_biblioteca`: curtida ou numa playlist dele."""
     con = banco()
     q = normalizar(texto)
     analisadas = set(espacos.analisadas(con))
@@ -115,7 +126,12 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
             if len(achadas) >= limite:
                 break
     meta = _faixas(con, achadas)
-    return [{**meta[v], "analisada": v in analisadas} for v in achadas]
+    biblioteca = set(consultas.biblioteca(con))
+    dislikes = consultas.com_dislike(con)
+    return [
+        {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes}
+        for v in achadas
+    ]
 
 
 def buscar_artistas(texto: str, limite: int = 20) -> list[dict]:
@@ -365,6 +381,170 @@ def mostrar_plano(plano_id: int | None = None) -> dict:
     }  # fmt: skip
 
 
+# ------------------------------------------------------------------ recomendações (#69, ADR-13)
+
+
+def exemplos_de_recomendacoes() -> list[dict]:
+    """Como decidir entre receita, recomendar_novas e recomendar_misturando_curtidas (e quando perguntar)."""
+    return json.loads(
+        resources.files("curator.interfaces")
+        .joinpath("exemplos_recomendacoes.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+def _cliente_yt():
+    from curator.coleta.cliente import abrir_cliente
+    from curator.config import caminhos, carregar_config
+
+    return abrir_cliente(caminhos().credenciais, carregar_config()["metadados"]["intervalo_s"])
+
+
+def _cliente_deezer():
+    from curator.coleta.deezer import ClienteDeezer
+
+    return ClienteDeezer()
+
+
+def _recomendar(escopo: str, modo: str | None, pedido: str | None, **campos) -> dict:
+    from curator.coleta.candidatas import SementeInvalida
+    from curator.coleta.cliente import CredencialAusente
+    from curator.config import carregar_config
+    from curator.motor import recomendar as rr
+
+    if modo not in ("rapido", "lento"):
+        return {"erros": [
+            "modo não informado: CONFIRME com o usuário se quer a recomendação 'rapido' (sem baixar nada, em "
+            "segundos) ou 'lento' (baixa e analisa as candidatas antes; leva horas) e chame de novo"
+        ]}  # fmt: skip
+    cfg = carregar_config()
+    try:
+        p = rr.Pedido.model_validate(
+            {"modo": modo, "escopo": escopo, **{k: v for k, v in campos.items() if v not in (None, [], {})}}
+        )
+    except ValidationError as e:
+        return {"erros": [f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()]}
+    con = banco()
+    try:
+        cli = _cliente_yt()
+        dz = _cliente_deezer() if "deezer" in p.com_padroes(cfg).fontes else None
+        res = rr.recomendar(con, cli, dz, p, cfg, pedido)
+    except (SementeInvalida, CredencialAusente) as e:
+        return {"erros": [str(e)]}
+    if res.status != "pronta":
+        return {
+            "recomendacao_id": res.recomendacao_id, "status": res.status, "pendentes": res.pendentes,
+            "proximo_passo": "as candidatas estão na fila de análise (depois da biblioteca); chame "
+                             "concluir_recomendacao mais tarde. O worker `curator analisar` precisa estar rodando.",
+        }  # fmt: skip
+    return _mostrar(con, res.recomendacao_id, dict(res.descartes))
+
+
+def _mostrar(con, rid: int, descartes: dict | None = None) -> dict:
+    from curator.motor import recomendacoes as rc
+
+    r = rc.obter(con, rid)
+    if r is None:
+        return {"erros": [f"recomendação #{rid} não existe"]}
+    return {
+        "recomendacao_id": rid, "status": r["status"], "modo": r["modo"], "escopo": r["escopo"],
+        "pedido": r["pedido"], "criada_em": r["criada_em"], **({"descartes": descartes} if descartes else {}),
+        "itens": [
+            {"posicao": i["posicao"], "video_id": i["video_id"], "titulo": i["titulo"], "artistas": i["artistas"],
+             "da_biblioteca": i["conhecida"], "fontes": i["fontes"], "votos": i["votos"],
+             "ja_sugerida_antes": i["vezes_antes"], "status": i["status"]}
+            for i in rc.itens(con, rid)
+        ],
+    }  # fmt: skip
+
+
+def recomendar_novas(
+    modo: Literal["rapido", "lento"] | None = None,
+    faixas: list[str] | None = None,
+    playlist: str | None = None,
+    cluster: int | None = None,
+    artista: str | None = None,
+    tamanho: int | None = None,
+    excluir_artistas: list[str] | None = None,
+    perfil_alvo: dict[str, Any] | None = None,
+    generos_preferidos: dict[str, float] | None = None,
+    pedido: str | None = None,
+) -> dict:
+    """Recomenda SÓ músicas novas (fora da biblioteca) parecidas com as sementes: faixas (video_ids de
+    buscar_faixas), uma playlist, um cluster ou um artista. `modo` é obrigatório: se o usuário não disse rápido
+    ou lento, PERGUNTE antes. perfil_alvo/generos_preferidos (como na receita) só no modo lento."""
+    return _recomendar("novas", modo, pedido, faixas=faixas, playlist=playlist, cluster=cluster, artista=artista,
+                       tamanho=tamanho, excluir_artistas=excluir_artistas, perfil_alvo=perfil_alvo,
+                       generos_preferidos=generos_preferidos)  # fmt: skip
+
+
+def recomendar_misturando_curtidas(
+    modo: Literal["rapido", "lento"] | None = None,
+    proporcao_novas: float = 0.5,
+    faixas: list[str] | None = None,
+    playlist: str | None = None,
+    cluster: int | None = None,
+    artista: str | None = None,
+    tamanho: int | None = None,
+    excluir_artistas: list[str] | None = None,
+    perfil_alvo: dict[str, Any] | None = None,
+    generos_preferidos: dict[str, float] | None = None,
+    pedido: str | None = None,
+) -> dict:
+    """Mistura músicas novas com as da biblioteca (proporcao_novas = fração de novas). Use SÓ quando o usuário
+    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE."""
+    return _recomendar("misturar", modo, pedido, proporcao_novas=proporcao_novas, faixas=faixas, playlist=playlist,
+                       cluster=cluster, artista=artista, tamanho=tamanho, excluir_artistas=excluir_artistas,
+                       perfil_alvo=perfil_alvo, generos_preferidos=generos_preferidos)  # fmt: skip
+
+
+def concluir_recomendacao(recomendacao_id: int, parcial: bool = False) -> dict:
+    """Fecha uma recomendação lenta quando as análises terminam (`parcial`: já, com o que estiver analisado)."""
+    from curator.config import carregar_config
+    from curator.motor import lento
+
+    con = banco()
+    try:
+        res = lento.concluir(con, recomendacao_id, carregar_config(), parcial)
+    except KeyError as e:
+        return {"erros": [str(e)]}
+    if res.status != "pronta":
+        return {"recomendacao_id": recomendacao_id, "status": res.status, "pendentes": res.pendentes}
+    return _mostrar(con, recomendacao_id)
+
+
+def mostrar_recomendacao(recomendacao_id: int) -> dict:
+    """Uma recomendação salva, com o status atual de cada faixa (curtida, dislike, em_playlist, sem_reacao)."""
+    return _mostrar(banco(), recomendacao_id)
+
+
+def historico_recomendacoes(limite: int = 10) -> list[dict]:
+    """Recomendações já feitas (mais recentes primeiro) e quantas faixas de cada viraram curtida ou dislike."""
+    from curator.motor import recomendacoes as rc
+
+    return [
+        {"recomendacao_id": r["recomendacao_id"], "criada_em": r["criada_em"], "pedido": r["pedido"],
+         "modo": r["modo"], "escopo": r["escopo"], "status": r["status"], "status_itens": r["status_itens"]}
+        for r in rc.listar(banco(), limite)
+    ]  # fmt: skip
+
+
+def criar_plano_da_recomendacao(
+    recomendacao_id: int,
+    nome: str | None = None,
+    playlist_destino: str | None = None,
+    permitir_novas: bool = False,
+) -> dict:
+    """Plano (não aplicado) com uma recomendação: por padrão, uma playlist NOVA "Descobertas · …".
+    playlist_destino + permitir_novas=true acrescenta numa playlist existente: SÓ se o usuário pediu isso."""
+    con = banco()
+    destino = _escopo(con, playlist_destino) if playlist_destino else None
+    try:
+        return mostrar_plano(planos.de_recomendacao(con, recomendacao_id, nome, destino, permitir_novas))
+    except ValueError as e:
+        return {"erros": [str(e)]}
+
+
 def faltantes_nas_agregadoras() -> dict:
     """Faixas das filhas que ainda não estão na playlist-mãe agregadora."""
     con = banco()
@@ -379,7 +559,9 @@ FERRAMENTAS = [
     arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
     sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
-    criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras,
+    criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,
+    recomendar_novas, recomendar_misturando_curtidas, concluir_recomendacao, mostrar_recomendacao,
+    historico_recomendacoes, criar_plano_da_recomendacao,
 ]  # fmt: skip
 
 # Nenhuma destas existe de propósito: aplicar no YouTube Music é só pela CLI, com confirmação.

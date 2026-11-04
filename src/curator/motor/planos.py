@@ -60,14 +60,44 @@ def _propagar(con: sqlite3.Connection, ops: list[Operacao]) -> list[Operacao]:
     return ops + list(extra.values())
 
 
+class NovasNaBiblioteca(ValueError):
+    """Faixas que o usuário não conhece iriam para uma playlist das curtidas sem pedido explícito (ADR-13)."""
+
+
+def _conferir_novas(con: sqlite3.Connection, ops: list[Operacao]) -> None:
+    from curator.banco.consultas import BIBLIOTECA
+
+    dentro = {r[0] for r in con.execute(BIBLIOTECA)}
+    descobertas = {r[0] for r in con.execute("SELECT playlist_id FROM playlists WHERE descobertas = 1")}
+    for o in ops:
+        if o.tipo != "adicionar" or o.playlist.startswith("nova:") or o.playlist in descobertas:
+            continue
+        if fora := [v for v in o.video_ids if v not in dentro]:
+            titulo = (con.execute("SELECT titulo FROM playlists WHERE playlist_id = ?", (o.playlist,)).fetchone()
+                      or [o.playlist])[0]  # fmt: skip
+            raise NovasNaBiblioteca(
+                f"{len(fora)} faixa(s) fora da biblioteca iriam para “{titulo}”: recomendações só entram nas suas "
+                "playlists com pedido explícito (--permitir-novas); por padrão viram uma playlist nova"
+            )
+
+
 def criar(
-    con: sqlite3.Connection, origem: str, ops: list[Operacao], propagar_agregadoras: bool = True
+    con: sqlite3.Connection,
+    origem: str,
+    ops: list[Operacao],
+    propagar_agregadoras: bool = True,
+    permitir_novas: bool = False,
 ) -> int:
     """Guarda o plano. Registra o retrato (snapshot_hash) de cada playlist existente afetada, para a aplicação
-    recusar o plano se a playlist mudar no YT depois disso (#44)."""
+    recusar o plano se a playlist mudar no YT depois disso (#44).
+
+    Acrescentar faixas de fora da biblioteca (recomendações) a uma playlist própria existente é recusado,
+    salvo com `permitir_novas` (ADR-13). Playlists novas e as de descobertas podem recebê-las."""
     ops = [o for o in ops if o.tipo in ("criar", "renomear") or o.video_ids]
     if not ops:
         raise ValueError("plano vazio: nenhuma alteração")
+    if not permitir_novas:
+        _conferir_novas(con, ops)
     if propagar_agregadoras:
         ops = _propagar(con, ops)
     # não adiciona o que a playlist já tem
@@ -193,6 +223,43 @@ def de_classificacao(con: sqlite3.Connection, decisoes) -> int:
             op.video_ids.append(d.video_id)
             op.motivo[d.video_id] = f"score {x.score:.2f} ≥ limiar {x.limiar:.2f}"
     return criar(con, "classificar", list(por.values()))
+
+
+def de_dislikes(con: sqlite3.Connection) -> int:
+    """Plano que tira das playlists próprias as faixas com dislike (#61). Nunca é automático: o usuário revisa
+    e aplica. As faixas continuam no banco, com a análise."""
+    from curator.banco.consultas import dislikes_em_playlists
+
+    ops = [
+        Operacao("remover", pid, ids, motivo=dict.fromkeys(ids, "dislike no YouTube Music"))
+        for pid, ids in dislikes_em_playlists(con).items()
+    ]
+    return criar(con, "dislikes", ops, propagar_agregadoras=False)
+
+
+def de_recomendacao(
+    con: sqlite3.Connection, rid: int, nome: str | None = None, destino: str | None = None,
+    permitir_novas: bool = False,
+) -> int:  # fmt: skip
+    """Plano com uma recomendação salva: por padrão, uma playlist NOVA "Descobertas · …" (marcada como de
+    descobertas ao ser aplicada). `destino` acrescenta a uma playlist existente, o que exige `permitir_novas`
+    se houver faixa fora da biblioteca. Faixas que receberam dislike depois da recomendação ficam de fora."""
+    from curator.motor import recomendacoes as rc
+
+    r = rc.obter(con, rid)
+    if r is None:
+        raise ValueError(f"recomendação #{rid} não existe")
+    if r["status"] != "pronta":
+        raise ValueError(f"recomendação #{rid} ainda está '{r['status']}'")
+    itens = [i for i in rc.itens(con, rid) if i["status"] != "dislike"]
+    nome = nome or f"Descobertas · {r['pedido'] or f'recomendação #{rid}'}"[:150]
+    alvo = destino or f"nova:{nome}"
+    ops = [] if destino else [Operacao("criar", alvo, titulo=nome)]
+    ops.append(Operacao(
+        "adicionar", alvo, [i["video_id"] for i in itens],
+        motivo={i["video_id"]: ("da biblioteca" if i["conhecida"] else f"nova · {', '.join(i['fontes'])}") for i in itens},
+    ))  # fmt: skip
+    return criar(con, f"recomendacao:{rid}", ops, permitir_novas=permitir_novas)
 
 
 def de_reorganizacao(con: sqlite3.Connection, sugestoes, escopo: str) -> int:

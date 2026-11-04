@@ -3,8 +3,9 @@
 from collections import Counter
 
 
-def faixa(vid, titulo=None, artistas=("Banda",), album=None, dur=200, set_id=None):
+def faixa(vid, titulo=None, artistas=("Banda",), album=None, dur=200, set_id=None, like=None):
     return {
+        "likeStatus": like,
         "videoId": vid,
         "title": titulo or f"Música {vid}",
         "artists": [{"name": a, "id": f"UC_{a.lower()}"} for a in artistas],
@@ -22,6 +23,12 @@ class FalsoYT:
         self.albuns: dict[str, dict] = {}
         self.falhar_album: set[str] = set()
         self.falhar_escrita: set[str] = set()
+        self.radios: dict[str, list[dict]] = {}  # semente → faixas do rádio (sem a própria semente)
+        self.relacionadas: dict[str, list[dict]] = {}
+        self.buscas: dict[str, list[dict]] = {}  # consulta → resultados de search(filter="songs")
+        self.avaliacoes: dict[
+            str, str
+        ] = {}  # video_id → likeStatus real (botão do player); padrão INDIFFERENT
         self._seq = 0
         self.chamadas = Counter()
 
@@ -31,7 +38,10 @@ class FalsoYT:
 
     def get_liked_songs(self, limit=100):
         self.chamadas["get_liked_songs"] += 1
-        return {"trackCount": len(self.curtidas), "tracks": list(self.curtidas)}
+        return {
+            "trackCount": len(self.curtidas),
+            "tracks": [{**t, "likeStatus": "LIKE"} for t in self.curtidas],
+        }
 
     def get_library_playlists(self, limit=25):
         self.chamadas["get_library_playlists"] += 1
@@ -50,6 +60,44 @@ class FalsoYT:
             "trackCount": len(p["tracks"]),
             "tracks": list(p["tracks"]),
         }
+
+    # ------------------------------------------------------------ recomendações (ADR-13)
+
+    def get_watch_playlist(self, videoId=None, playlistId=None, limit=25, radio=False, shuffle=False):
+        self.chamadas["get_watch_playlist"] += 1
+        if videoId not in self.radios:
+            raise Exception("HTTP 404: vídeo indisponível")
+        semente = {"videoId": videoId, "title": f"Semente {videoId}", "length": "3:00", "artists": []}
+        tracks = [semente] + [
+            {k: v for k, v in t.items() if k not in ("duration_seconds", "setVideoId")} | {"length": "3:20"}
+            for t in self.radios[videoId]
+        ]
+        return {"tracks": tracks, "related": f"MPTRt_{videoId}" if videoId in self.relacionadas else None}
+
+    def _send_request(self, endpoint, body, *a, **k):
+        """Só o "next" cru: o botão de like do player mostra o dislike que o rádio esconde."""
+        assert endpoint == "next", endpoint
+        self.chamadas["next"] += 1
+        vid = body["videoId"]
+        botao = {
+            "likeButtonRenderer": {
+                "target": {"videoId": vid},
+                "likeStatus": self.avaliacoes.get(vid, "INDIFFERENT"),
+            }
+        }
+        return {"playerOverlays": {"playerOverlayRenderer": {"actions": [botao]}}}
+
+    def get_song_related(self, browseId):
+        self.chamadas["get_song_related"] += 1
+        vid = browseId.removeprefix("MPTRt_")
+        return [
+            {"title": "Você também pode gostar", "contents": list(self.relacionadas[vid])},
+            {"title": "Playlists recomendadas", "contents": [{"playlistId": "RDx", "title": "Mix"}]},
+        ]
+
+    def search(self, query, filter=None, limit=20, ignore_spelling=False):
+        self.chamadas["search"] += 1
+        return list(self.buscas.get(query, []))
 
     # ------------------------------------------------------------ escrita (M7)
 

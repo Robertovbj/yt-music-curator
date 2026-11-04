@@ -1,6 +1,6 @@
 # Decisões de projeto: yt-music-curator
 
-> Estado: **fase de design**, sem código ainda. Data: 2026-11-03.
+> Estado: **fase de design**, sem código ainda. Data: 2026-11-03. Atualizado em 2026-11-04 (ADR-13, avaliações e preservação no ADR-02/03).
 > Este documento registra as decisões de arquitetura (ADRs), o motivo de cada uma e as alternativas rejeitadas.
 
 ## Sumário
@@ -20,6 +20,7 @@
 - [ADR-10: Interfaces (CLI e MCP)](#adr-10-interfaces-cli-e-mcp)
 - [ADR-11: Visualizador gráfico](#adr-11-visualizador-gráfico)
 - [ADR-12: Segurança e higiene](#adr-12-segurança-e-higiene)
+- [ADR-13: Recomendações fora da biblioteca](#adr-13-recomendações-fora-da-biblioteca)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -143,6 +144,7 @@ src/curator/
 | `execucoes` | `receita_id`, `versao_banco`, lista resultante, data (permite comparar execuções) |
 | `planos` | id, origem (receita, classificação, reorganização), diff (JSON), status (`pendente`/`aplicado`/`descartado`), log |
 | `projecoes` | coordenadas UMAP 2D/3D por espaço, com `hash_biblioteca` (ver ADR-11) |
+| `coletas`, `recomendacoes`, `recomendacao_itens`, `deezer_casamentos` | recomendações fora da biblioteca (ADR-13) |
 
 **Regras de cache e invalidação**
 
@@ -151,6 +153,7 @@ src/curator/
 - **Falha não é cache.** Uma chamada que falha não grava resultado vazio. O item vai para a fila com backoff (bug do helper).
 - **Análise:** é feita **uma vez por faixa**. Só é refeita quando `versao_analisador` ou `hash_modelos` mudam. O áudio nunca é guardado.
 - **Vetores completos.** Todos os vetores de probabilidade (400, 87, 56, 40 dimensões) e os embeddings ficam salvos, para que filtros e receitas novas não precisem de reanálise.
+- **Uma faixa analisada nunca sai do banco (#59).** Sair das curtidas e de todas as playlists só muda o pertencimento: a análise e os vetores ficam, e são reaproveitados se a faixa voltar ou for recomendada. Uma trava (`BEFORE DELETE ON faixas`) recusa apagar faixa com análise; ela fica em `faixas`, e não trocando o `CASCADE` das tabelas de análise por `RESTRICT`, para não reescrever a tabela de vetores, a maior do banco. Faixa recomendada também não pode ser apagada (chave estrangeira sem cascata em `recomendacao_itens`).
 
 **Busca vetorial:** com milhares de faixas, um cosseno *brute-force* em numpy (matriz N × 1280, float32) responde em milissegundos. Por isso não há sqlite-vec nem banco vetorial dedicado. Essa decisão é reavaliada acima de ~100 mil faixas.
 
@@ -174,6 +177,19 @@ src/curator/
   - **Não alocada** = curtida que não está em nenhuma playlist própria.
   - **Exclusiva da mãe** = está na mãe, mas em nenhuma filha (o conceito do helper, mantido).
 - Uma faixa pode estar em várias folhas ao mesmo tempo. Isso é esperado (ver ADR-06/07).
+- **Biblioteca** exclui as playlists de descobertas (`playlists.descobertas`, criadas a partir de recomendações, ADR-13): o que só está nelas ainda não foi curtido.
+- **Faixas fora da biblioteca** (descurtidas, candidatas de recomendação) ficam guardadas com a análise (ADR-02), mas fora de todos os universos, do z-score, do mapa e dos clusters (`espacos.da_biblioteca`).
+
+**Avaliações (#60, #61).** `faixas.avaliacao` é `like`, `dislike` ou `neutra`, lida do `likeStatus` do ytmusicapi.
+- O `get_playlist` (e as curtidas, que são uma playlist) lê o botão de like de verdade: a sincronização das playlists traz likes e dislikes. No `get_watch_playlist` (rádio), o ytmusicapi lê o menu, que só sabe "like" ou não, e "INDIFFERENT" pode ser um dislike (a docstring avisa). De lá só o LIKE vale, e nada que venha do rádio desfaz um dislike.
+- Não existe lista de "músicas com dislike" na API (nem no ytmusicapi 1.12). Mas a resposta crua do endpoint `next` (o mesmo do rádio) traz o **botão de like do player** do vídeo consultado, com `LIKE`, `DISLIKE` ou `INDIFFERENT` (verificado em 04/11 com uma faixa com dislike que não está em nenhuma playlist). `avaliacao_atual` faz essa leitura, uma chamada por faixa:
+  - toda música nova de uma recomendação é conferida antes de ser salva; as que vierem com dislike (ou já curtidas) saem e o ranking é refeito. No modo lento, isso acontece antes de a candidata ir para a fila, e o dislike não gasta download;
+  - cada `curator sincronizar` confere de novo as recomendadas ainda sem reação (`conferir_por_rodada`, 100), as que não foram conferidas há `conferir_validade_dias` (7). Assim um dislike dado ouvindo pelo app, fora das suas playlists, chega ao curator;
+  - `avaliacao_conferida_em` guarda a última leitura confiável (playlists, curtidas ou botão do player).
+- **Dislike é filtro duro**: fora de receitas (todos os universos), classificação (decisões e centroides), clusters, reorganização, mapa e recomendações. A faixa e a análise ficam. `curator plano dislikes` sugere tirá-las das suas playlists; nunca é automático.
+- **Parecer com um dislike custa** nas recomendações (`fatores_dislike`), a partir dos seus dados sincronizados:
+  - artista: o score é multiplicado por 1 − 0,5 × (dislikes do artista ÷ faixas avaliadas dele: curtidas + dislikes). Um dislike num artista com 400 curtidas quase não pesa; um artista só com dislikes perde metade;
+  - som: se a candidata tem análise e a faixa mais parecida com ela (embedding) é um dislike e não uma da biblioteca, perde até mais 50%, proporcional à diferença de similaridade (margem 0,1). No modo rápido isso vale para candidatas já analisadas; no lento, para todas.
 
 ## ADR-04: Representação vetorial
 
@@ -418,8 +434,10 @@ Porte de `yt-classifier/teste.py` (modelos e `CUSTOM_GENRES` em `:44-80`, `Analy
 | `classificar [--mae X]` | ADR-06; gera um plano |
 | `receita criar/executar/listar` | ADR-05 |
 | `reorganizar [--mae X]` | ADR-07; gera um plano |
-| `plano mostrar/aplicar/descartar` | Diff e aplicação **com confirmação** |
+| `plano mostrar/aplicar/descartar/dislikes` | Diff e aplicação **com confirmação**; `dislikes` sugere tirar das playlists o que levou dislike |
 | `visualizar` | ADR-11 |
+| `recomendar rapido/lento [--misturar-curtidas]` | ADR-13: músicas novas (ou misturadas, só com a flag), com confirmação |
+| `recomendacoes listar/mostrar/concluir/plano/acerto` | ADR-13: histórico, status após sincronizar e taxa de acerto |
 
 **Servidor MCP** (para o Claude Code e o Claude Desktop, usando a sua assinatura, sem custo de API):
 
@@ -434,6 +452,8 @@ Porte de `yt-classifier/teste.py` (modelos e `CUSTOM_GENRES` em `:44-80`, `Analy
 | `classificar_nao_alocadas` | ADR-06 |
 | `sugerir_reorganizacao` | ADR-07 |
 | `criar_plano` | Gera um diff pendente |
+| `recomendar_novas`, `recomendar_misturando_curtidas` | ADR-13; `modo` sem padrão: na dúvida, a IA pergunta |
+| `concluir_recomendacao`, `mostrar_recomendacao`, `historico_recomendacoes`, `criar_plano_da_recomendacao`, `exemplos_de_recomendacoes` | ADR-13 |
 
 - **Não existe ferramenta MCP que aplique planos.** A aplicação no YouTube Music só acontece por `curator plano aplicar`, depois que você revisa o diff. Isso evita que uma conversa altere suas playlists por engano.
 - **Escrita no YT Music:** `create_playlist`, `add_playlist_items` e `remove_playlist_items` do ytmusicapi, com log no plano. Depois de aplicar, a playlist é sincronizada de novo para confirmar.
@@ -470,6 +490,44 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - O áudio baixado nunca é persistido.
 - **Backup (M8):** `curator backup criar` gera um zip com o banco, copiado pela API de backup online do SQLite (consistente mesmo com o worker gravando), mais `config.toml`, `hierarquia.toml` e um manifesto com versões, contagens e SHA-256 de cada arquivo. Credenciais (`browser.json`, `saidas.env`) só entram com `--com-credenciais`, e aí o zip fica com permissão 600. `curator backup restaurar` confere tudo antes de tocar em qualquer coisa, recusa backups de schema mais novo, migra os mais antigos e nunca apaga: com `--forcar`, os dados atuais são renomeados para `*.antes-da-restauracao-<data>`. Também recusa restaurar por cima com o worker rodando.
 
+## ADR-13: Recomendações fora da biblioteca
+
+**Problema:** pedir músicas que o usuário ainda **não** conhece, a partir do que ele já gosta, sem misturar com as curtidas (salvo pedido explícito) e sem perder o que já foi sugerido.
+
+**Fonte principal: o rádio do YouTube Music, com várias sementes** (`get_watch_playlist(radio=True)` e a aba "relacionadas", `get_song_related`). Os IDs já são do YT, e o rádio considera o que as pessoas ouvem juntas, não só o som. Num teste com 3 curtidas sorteadas, 43, 32 e 18 de 49 faixas estavam fora da biblioteca e eram coerentes (Anamanaguchi, Reol, Mili, Yu-Peng Chen, Yuki Kajiura, Lorien Testard).
+- Sementes: faixas; as k mais próximas do centroide de uma playlist; os núcleos de um cluster; as curtidas mais recentes de um artista. Dislikes nunca são sementes.
+- Cada resposta vira uma **coleta** salva (snapshot). O rádio muda com o tempo, e isso é bom: depois de `cache_h` (12 h) a mesma semente é coletada de novo. Mas o ranking sempre pode ser refeito sobre a coleta salva.
+- **Deezer** como fonte extra, para variar além do que o YT sugere: artistas relacionados (`/artist/{id}/related`) → faixas mais tocadas (`/top`). API pública e sem chave. Cada faixa é casada com um video_id pela busca do ytmusicapi, com as regras do ADR-08.4 (título, artista, duração ±3 s, sem variantes). Sem casamento confiável, é descartada. Os casamentos ficam em cache, inclusive os que falharam. O artista da semente só é usado se o nome no Deezer for igual (sem acento/caixa): um artista errado traria recomendações de outro mundo.
+
+**Alternativas rejeitadas**
+- **ReccoBeats** (API grátis que imita o `recommendations` do Spotify): testada em 04/11. Recomenda só por features de áudio, sem gênero nem contexto. Sementes HOYO-MiX trouxeram jazz (Barry Harris Trio) e Carole King; LISA trouxe funk e Taylor Swift. Além disso, a busca é só por título (metade das curtidas de uma amostra não foi encontrada) e não há ISRC na biblioteca.
+- **Spotify `recommendations`/`related-artists`:** 403 para apps criados depois de 27/11/2024.
+- **Last.fm `track.getSimilar`:** bom para nichos, mas exige chave; fica para depois, se o Deezer não bastar.
+
+**Escopo e modo: sempre explícitos, nunca com padrão**
+
+| Intenção | Terminal | MCP |
+|---|---|---|
+| Só curtidas | `curator receita executar` | `executar_receita` |
+| Só músicas novas | `curator recomendar rapido\|lento` | `recomendar_novas` |
+| Misturar | `curator recomendar … --misturar-curtidas` | `recomendar_misturando_curtidas` |
+
+- Na **menor dúvida** sobre escopo ou modo, confirmar antes de executar. O terminal mostra o resumo (modo, escopo, sementes, fontes, destino) e pede confirmação (`--sim` pula; fora de um terminal, sem `--sim`, recusa). No MCP, `modo` não tem padrão: sem ele, a ferramenta devolve um erro pedindo para confirmar com o usuário. As instruções do servidor e `exemplos_de_recomendacoes` trazem os três casos de referência (ver Fluxos).
+- **Modo rápido:** sem baixar nada. Cada aparição numa coleta vale `peso_da_fonte × (1 − ½·posição/tamanho)` (YT rádio 1,0; relacionadas 0,8; Deezer 0,6), somado entre sementes. Limite por artista, desempate por video_id.
+- **Modo lento:** as `analisar_top` (60) melhores do ranking rápido entram na fila de download com **prioridade 1**: só baixam quando não há faixa da biblioteca pendente para a saída, sem cota própria. A recomendação fica "aguardando_analise" até a fila terminar (`curator recomendacoes concluir`, `--aguardar` ou `--parcial`). Ordem final: 0,6 × motor (similaridade com as sementes analisadas, perfil-alvo e gêneros, como numa receita; z-score sobre a biblioteca, para as candidatas não mexerem na régua) + 0,4 × coleta. `perfil_alvo` e `generos_preferidos` só existem no modo lento.
+- **Misturar:** as faixas da biblioteca que os rádios trouxeram, completadas pelo motor (parecidas com as sementes, com as análises que já existem) e intercaladas às novas na proporção pedida (padrão 50%).
+
+**Destino:** conforme o comando. Por padrão, só a lista. Com `--criar-playlist` (MCP: `criar_plano_da_recomendacao`), um plano de playlist **nova** "Descobertas · <pedido>", que é marcada `descobertas` ao ser aplicada. Acrescentar recomendações a uma playlist sua existente é recusado pelo próprio plano (`NovasNaBiblioteca`), salvo com `--adicionar-em X --permitir-novas`.
+
+**Histórico e repetição**
+- Toda recomendação fica salva, com as coletas usadas e a posição, score, fontes e votos de cada faixa.
+- "Já ouvi" = curti depois. O status de cada item é recalculado a cada leitura, depois de `curator sincronizar`: `curtida`, `dislike`, `em_playlist` (pus numa playlist minha comum) ou `sem_reacao`.
+- Curtida ou dislike saem das próximas recomendações (a curtida passa a ser biblioteca; o dislike, para sempre). O dislike é conferido no botão de like do player, antes de salvar e a cada sincronização (ADR-03), e o que parece com dislikes (mesmo artista, som parecido) é penalizado.
+- Sem reação: pode voltar, com 15% a menos de score a cada recomendação anterior; depois de 3 vezes, fica fora por 30 dias.
+- `curator recomendacoes acerto` dá a taxa de acerto (curtida ou posta numa playlist) e de dislike por fonte e por modo, para ajustar `[recomendacoes] pesos_fontes`. Um pedido repetido com as mesmas sementes diz quantas faixas são novas em relação à última vez.
+
+**Custos e ritmo:** tudo é leitura no YT pela mesma conta da sincronização (ytmusicapi, com a pausa do cliente); uma chamada de rádio serve ao rádio e às relacionadas. As candidatas não geram buscas de metadados de álbum (só os álbuns da biblioteca são completados). Downloads só no modo lento, depois da biblioteca.
+
 ---
 
 ## Fluxos dos pedidos de exemplo
@@ -481,6 +539,9 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 | "Quero uma playlist de rock geral, e uma playlist com meus subgêneros centrais de rock" | (1) Receita com o gênero-pai **Rock** ≥ limiar. (2) Dentro desse universo, o motor soma a massa dos estilos `Rock---*`, escolhe os estilos que concentram a maior parte da sua biblioteca, ou roda `sugerir_reorganizacao` restrito a esse universo, e gera uma playlist por subgênero central. Uma faixa pode entrar em várias. Se a árvore já tiver "Rock - All" e filhas, o plano propõe ajustes nela em vez de duplicar. |
 | "Veja todas minhas músicas curtidas que ainda não estão em uma playlist, e me diga onde colocar" | `classificar_nao_alocadas` (ADR-06): multi-rótulo hierárquico. As faixas "sem destino" vêm agrupadas como possíveis playlists novas. → plano. |
 | "Veja todas as minhas músicas. Sugira playlists para eu poder organizar melhor" | `sugerir_reorganizacao` (ADR-07): clusters sobrepostos, nomes dados pela IA a partir das estatísticas, sugestões de fusão e divisão comparando com a árvore atual. → plano. |
+| "Quero uma playlist de pop MISTURANDO minhas curtidas e músicas que não conheço" | Pedido explícito de misturar: `recomendar_misturando_curtidas` com a playlist de pop como semente (ADR-13). Se o modo (rápido/lento) não foi dito, a IA pergunta antes. |
+| "Me recomende uma playlist pra dirigir" | Não diz se é das curtidas, de músicas novas ou das duas: a IA **pergunta antes de chamar qualquer ferramenta** (ADR-13). |
+| "Quero músicas parecidas com a música X, ou com a playlist Y" | "Parecidas com" = músicas novas: `recomendar_novas` com X (`buscar_faixas`) ou Y como semente. Pergunta o modo se não foi dito. |
 | "Quero uma playlist de músicas para dormir, mas não inclua nenhuma da Hoyoverse" | A IA chama `buscar_artistas("hoyo")` e `buscar_albuns` (Genshin, Star Rail, ZZZ…) e coloca os nomes reais em `excluir_*`. O perfil-alvo é relaxed alto e arousal e energy baixos (exemplo de receita no ADR-05). A exclusão é uma comparação exata. |
 
 ## Roteiro
@@ -494,6 +555,8 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 | 5. Reorganização | UMAP, HDBSCAN, sobreposição, nomes | Os clusters são estáveis entre execuções e as sugestões de fusão aparecem. |
 | 6. Visualizador | HTML 2D/3D e valência × excitação | Abre offline e as cores e buscas funcionam. |
 | 7. Aplicar planos | Escrita no YT Music | O plano aplicado aparece no app e a ressincronização confirma. |
+| 9. Avaliações e preservação | Dislikes, trava das análises | Faixa que sai de tudo mantém a análise; dislike fora de toda lista. |
+| 10. Recomendações | Rádio do YT + Deezer, rápido/lento, histórico | O mesmo pedido em dias diferentes gera recomendações salvas; curtidas e dislikes saem das próximas; nada entra nas playlists das curtidas sem pedido explícito. |
 
 ## Riscos e questões em aberto
 
@@ -502,6 +565,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - **Tamanho da biblioteca:** medido em 3417 faixas (218 h). O brute-force em numpy sobra (ADR-02); a cota define os ~18 dias da carga inicial (ADR-08.5).
 - **Custo do Essentia na CPU:** medido em ~5–6 s por faixa de 3 min e ~2,1 GB de RAM. Não é o gargalo (a cota é), então paralelismo e GPU ficam fora por enquanto.
 - **Playlists com poucos membros:** o kNN fica frágil, e por isso há o fallback descritivo do ADR-06.
+- **Leitura do botão de like do player:** usa a resposta crua do endpoint `next`, que o ytmusicapi não expõe (ADR-03). Se o YouTube mudar o formato, a conferência para de achar o botão (`sem_resposta` no resumo) e os dislikes fora das playlists deixam de ser vistos, sem quebrar o resto.
 - **Hierarquia com mais de uma mãe:** hoje é uma árvore (uma mãe só). Se precisar de DAG, troca-se `mae_id` por uma tabela de arestas.
 
 ## Referências

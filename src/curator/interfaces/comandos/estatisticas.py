@@ -6,7 +6,7 @@ import typer
 
 from curator.banco import consultas
 from curator.interfaces.cli import app
-from curator.interfaces.comum import banco
+from curator.interfaces.comum import aviso, banco
 
 
 @app.command()
@@ -20,6 +20,15 @@ def estatisticas(como_json: bool = typer.Option(False, "--json", help="Saída em
         f"biblioteca: {est['biblioteca']} faixas ({est['duracao_total_h']} h) · curtidas: {est['curtidas']} · "
         f"não alocadas: {est['nao_alocadas']} · playlists próprias: {est['playlists_proprias']}"
     )
+    if est["dislikes"]:
+        typer.echo(f"com dislike (nunca usadas em playlists e recomendações): {est['dislikes']}")
+    if est["dislikes_em_playlists"]:
+        aviso(
+            f"{est['dislikes_em_playlists']} faixa(s) com dislike ainda estão nas suas playlists; "
+            "`curator plano dislikes` sugere a remoção"
+        )
+    if est["analisadas_fora_da_biblioteca"]:
+        typer.echo(f"analisadas fora da biblioteca (guardadas): {est['analisadas_fora_da_biblioteca']}")
     typer.echo("análise: " + (", ".join(f"{k}: {v}" for k, v in sorted(est["analise"].items())) or "—"))
     for p in est["playlists"]:
         agreg = " [agregadora]" if p["tipo"] == "agregadora" else ""

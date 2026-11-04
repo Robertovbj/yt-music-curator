@@ -1,0 +1,17 @@
+[
+  {
+    "pedido": "Quero uma playlist de pop MISTURANDO minhas curtidas e músicas que não conheço",
+    "decisao": "O pedido diz explicitamente que é para misturar: recomendar_misturando_curtidas. Ainda falta o modo (rápido ou lento): pergunte, a menos que o usuário já tenha dito.",
+    "chamada": {"ferramenta": "recomendar_misturando_curtidas", "argumentos": {"modo": "<perguntar>", "playlist": "<a playlist de pop, via arvore_playlists>", "proporcao_novas": 0.5}}
+  },
+  {
+    "pedido": "Me recomende uma playlist pra dirigir",
+    "decisao": "Não diz se é só das curtidas, só músicas novas ou as duas. NÃO chame nada: pergunte ao usuário (curtidas → receita; novas → recomendar_novas; misturar → recomendar_misturando_curtidas) e, se for recomendação, o modo.",
+    "chamada": null
+  },
+  {
+    "pedido": "Quero músicas parecidas com a música X (ou com a playlist Y)",
+    "decisao": "\"Parecidas com\" = músicas novas, que o usuário ainda não conhece: recomendar_novas, com X (buscar_faixas) ou Y (arvore_playlists) como semente. Pergunte o modo se ele não disse.",
+    "chamada": {"ferramenta": "recomendar_novas", "argumentos": {"modo": "<perguntar>", "faixas": ["<video_id de X>"]}}
+  }
+]
