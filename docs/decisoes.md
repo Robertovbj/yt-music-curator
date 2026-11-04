@@ -181,9 +181,15 @@ src/curator/
 - **Faixas fora da biblioteca** (descurtidas, candidatas de recomendação) ficam guardadas com a análise (ADR-02), mas fora de todos os universos, do z-score, do mapa e dos clusters (`espacos.da_biblioteca`).
 
 **Avaliações (#60, #61).** `faixas.avaliacao` é `like`, `dislike` ou `neutra`, lida do `likeStatus` do ytmusicapi.
-- Só o `get_playlist` (e as curtidas, que são uma playlist) lê o botão de like de verdade. No `get_watch_playlist` (rádio), "INDIFFERENT" pode ser um dislike (a docstring do ytmusicapi avisa), então de lá só o LIKE vale, e nada que venha do rádio desfaz um dislike.
-- Não existe lista de "músicas com dislike" na API (nem no ytmusicapi 1.12). Portanto **um dislike só é visto se a faixa estiver numa playlist sua**, inclusive as de descobertas. Um dislike dado numa faixa que não está em nenhuma playlist (ouvida pela busca ou pelo rádio do app) não chega ao curator.
+- O `get_playlist` (e as curtidas, que são uma playlist) lê o botão de like de verdade: a sincronização das playlists traz likes e dislikes. No `get_watch_playlist` (rádio), o ytmusicapi lê o menu, que só sabe "like" ou não, e "INDIFFERENT" pode ser um dislike (a docstring avisa). De lá só o LIKE vale, e nada que venha do rádio desfaz um dislike.
+- Não existe lista de "músicas com dislike" na API (nem no ytmusicapi 1.12). Mas a resposta crua do endpoint `next` (o mesmo do rádio) traz o **botão de like do player** do vídeo consultado, com `LIKE`, `DISLIKE` ou `INDIFFERENT` (verificado em 04/11 com uma faixa com dislike que não está em nenhuma playlist). `avaliacao_atual` faz essa leitura, uma chamada por faixa:
+  - toda música nova de uma recomendação é conferida antes de ser salva; as que vierem com dislike (ou já curtidas) saem e o ranking é refeito. No modo lento, isso acontece antes de a candidata ir para a fila, e o dislike não gasta download;
+  - cada `curator sincronizar` confere de novo as recomendadas ainda sem reação (`conferir_por_rodada`, 100), as que não foram conferidas há `conferir_validade_dias` (7). Assim um dislike dado ouvindo pelo app, fora das suas playlists, chega ao curator;
+  - `avaliacao_conferida_em` guarda a última leitura confiável (playlists, curtidas ou botão do player).
 - **Dislike é filtro duro**: fora de receitas (todos os universos), classificação (decisões e centroides), clusters, reorganização, mapa e recomendações. A faixa e a análise ficam. `curator plano dislikes` sugere tirá-las das suas playlists; nunca é automático.
+- **Parecer com um dislike custa** nas recomendações (`fatores_dislike`), a partir dos seus dados sincronizados:
+  - artista: o score é multiplicado por 1 − 0,5 × (dislikes do artista ÷ faixas avaliadas dele: curtidas + dislikes). Um dislike num artista com 400 curtidas quase não pesa; um artista só com dislikes perde metade;
+  - som: se a candidata tem análise e a faixa mais parecida com ela (embedding) é um dislike e não uma da biblioteca, perde até mais 50%, proporcional à diferença de similaridade (margem 0,1). No modo rápido isso vale para candidatas já analisadas; no lento, para todas.
 
 ## ADR-04: Representação vetorial
 
@@ -516,7 +522,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 **Histórico e repetição**
 - Toda recomendação fica salva, com as coletas usadas e a posição, score, fontes e votos de cada faixa.
 - "Já ouvi" = curti depois. O status de cada item é recalculado a cada leitura, depois de `curator sincronizar`: `curtida`, `dislike`, `em_playlist` (pus numa playlist minha comum) ou `sem_reacao`.
-- Curtida ou dislike saem das próximas recomendações (a curtida passa a ser biblioteca; o dislike, para sempre).
+- Curtida ou dislike saem das próximas recomendações (a curtida passa a ser biblioteca; o dislike, para sempre). O dislike é conferido no botão de like do player, antes de salvar e a cada sincronização (ADR-03), e o que parece com dislikes (mesmo artista, som parecido) é penalizado.
 - Sem reação: pode voltar, com 15% a menos de score a cada recomendação anterior; depois de 3 vezes, fica fora por 30 dias.
 - `curator recomendacoes acerto` dá a taxa de acerto (curtida ou posta numa playlist) e de dislike por fonte e por modo, para ajustar `[recomendacoes] pesos_fontes`. Um pedido repetido com as mesmas sementes diz quantas faixas são novas em relação à última vez.
 
@@ -559,7 +565,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - **Tamanho da biblioteca:** medido em 3417 faixas (218 h). O brute-force em numpy sobra (ADR-02); a cota define os ~18 dias da carga inicial (ADR-08.5).
 - **Custo do Essentia na CPU:** medido em ~5–6 s por faixa de 3 min e ~2,1 GB de RAM. Não é o gargalo (a cota é), então paralelismo e GPU ficam fora por enquanto.
 - **Playlists com poucos membros:** o kNN fica frágil, e por isso há o fallback descritivo do ADR-06.
-- **Dislikes fora das playlists:** a API não lista as músicas com dislike (ADR-03). Se isso fizer falta, uma saída é uma playlist privada de conferência, mantida pelo curator com as recomendações ainda sem reação; ela exige escrita no YT e não foi feita.
+- **Leitura do botão de like do player:** usa a resposta crua do endpoint `next`, que o ytmusicapi não expõe (ADR-03). Se o YouTube mudar o formato, a conferência para de achar o botão (`sem_resposta` no resumo) e os dislikes fora das playlists deixam de ser vistos, sem quebrar o resto.
 - **Hierarquia com mais de uma mãe:** hoje é uma árvore (uma mãe só). Se precisar de DAG, troca-se `mae_id` por uma tabela de arestas.
 
 ## Referências

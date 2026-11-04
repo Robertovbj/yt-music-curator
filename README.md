@@ -169,7 +169,7 @@ uv run curator recomendacoes acerto        # taxa de acerto por fonte (yt_radio,
 uv run curator plano dislikes              # plano que tira das suas playlists o que levou dislike
 ```
 
-Toda recomendação mostra o resumo e pede confirmação. Ela nunca entra numa playlist sua existente sem `--adicionar-em X --permitir-novas`. Uma faixa sugerida 3 vezes sem reação fica 30 dias de fora. Os ajustes ficam em `[recomendacoes]` no `config.toml`. O dislike só é visto se a faixa estiver numa playlist sua (limitação da API; ver ADR-03).
+Toda recomendação mostra o resumo e pede confirmação. Ela nunca entra numa playlist sua existente sem `--adicionar-em X --permitir-novas`. Uma faixa sugerida 3 vezes sem reação fica 30 dias de fora. Os ajustes ficam em `[recomendacoes]` no `config.toml`. Antes de mostrar, cada música nova tem o like/dislike conferido no YT: o que levou dislike sai. Cada `curator sincronizar` confere de novo as sugeridas ainda sem reação. O que parece com o que você deu dislike (mesmo artista, som parecido) perde pontos.
 
 ### Backup e outro computador
 
