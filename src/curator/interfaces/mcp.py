@@ -88,7 +88,8 @@ def arvore_playlists() -> list[dict]:
     out = []
     for p in con.execute(
         """SELECT p.playlist_id, p.titulo, p.tipo, m.titulo AS mae FROM playlists p
-           LEFT JOIN playlists m ON m.playlist_id = p.mae_id WHERE p.propria = 1 ORDER BY p.titulo"""
+           LEFT JOIN playlists m ON m.playlist_id = p.mae_id
+           WHERE p.propria = 1 AND p.ignorada = 0 ORDER BY p.titulo"""
     ):
         membros = {
             r[0]
@@ -116,7 +117,8 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     analisadas = set(espacos.analisadas(con))
     achadas = []
     for r in con.execute(
-        "SELECT video_id, titulo, artistas, album_nome FROM faixas ORDER BY coalesce(posicao_curtida, 1e9), video_id"
+        f"SELECT video_id, titulo, artistas, album_nome FROM faixas WHERE video_id NOT IN ({consultas.IGNORADAS}) "
+        "ORDER BY coalesce(posicao_curtida, 1e9), video_id"
     ):
         alvo = normalizar(
             f"{r['titulo']} {' '.join(a['nome'] for a in json.loads(r['artistas']))} {r['album_nome'] or ''}"
@@ -139,8 +141,8 @@ def buscar_artistas(texto: str, limite: int = 20) -> list[dict]:
     con = banco()
     q = normalizar(texto)
     linhas = con.execute(
-        """SELECT a.nome, count(fa.video_id) AS faixas FROM artistas a JOIN faixa_artistas fa USING (artista_id)
-           GROUP BY a.artista_id ORDER BY faixas DESC, a.nome"""
+        f"""SELECT a.nome, count(fa.video_id) AS faixas FROM artistas a JOIN faixa_artistas fa USING (artista_id)
+            WHERE fa.video_id NOT IN ({consultas.IGNORADAS}) GROUP BY a.artista_id ORDER BY faixas DESC, a.nome"""
     ).fetchall()
     return [dict(r) for r in linhas if q in normalizar(r["nome"])][:limite]
 
@@ -150,7 +152,8 @@ def buscar_albuns(texto: str, limite: int = 20) -> list[dict]:
     con = banco()
     q = normalizar(texto)
     linhas = con.execute(
-        "SELECT album_nome AS album, count(*) AS faixas FROM faixas WHERE album_nome IS NOT NULL GROUP BY album_nome ORDER BY faixas DESC, album_nome"
+        f"SELECT album_nome AS album, count(*) AS faixas FROM faixas WHERE album_nome IS NOT NULL "
+        f"AND video_id NOT IN ({consultas.IGNORADAS}) GROUP BY album_nome ORDER BY faixas DESC, album_nome"
     ).fetchall()
     return [dict(r) for r in linhas if q in normalizar(r["album"])][:limite]
 

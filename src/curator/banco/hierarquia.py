@@ -89,7 +89,7 @@ def aplicar(con: sqlite3.Connection, nos: list[No]) -> int:
 
 def arvore(con: sqlite3.Connection) -> str:
     linhas = con.execute(
-        """SELECT p.playlist_id, p.titulo, p.mae_id, p.tipo, count(pf.video_id) AS n
+        """SELECT p.playlist_id, p.titulo, p.mae_id, p.tipo, p.ignorada, count(pf.video_id) AS n
            FROM playlists p LEFT JOIN playlist_faixas pf USING (playlist_id)
            WHERE p.propria = 1 GROUP BY p.playlist_id ORDER BY p.titulo"""
     ).fetchall()
@@ -104,6 +104,7 @@ def arvore(con: sqlite3.Connection) -> str:
             ultimo = i == len(itens) - 1
             ramo = "" if mae is None else ("└─ " if ultimo else "├─ ")
             marca = " [agregadora]" if p["tipo"] == "agregadora" else ""
+            marca += " [ignorada]" if p["ignorada"] else ""
             out.append(f"{prefixo}{ramo}{p['titulo']} ({p['n']}){marca}")
             desenhar(p["playlist_id"], prefixo + ("" if mae is None else ("   " if ultimo else "│  ")))
 
@@ -114,11 +115,14 @@ def arvore(con: sqlite3.Connection) -> str:
 def faltantes_nas_agregadoras(con: sqlite3.Connection) -> dict[str, list[str]]:
     """{mãe agregadora: [video_ids que estão em alguma descendente e não nela]}."""
     out = {}
-    for (mae,) in con.execute("SELECT playlist_id FROM playlists WHERE tipo = 'agregadora'").fetchall():
+    for (mae,) in con.execute(
+        "SELECT playlist_id FROM playlists WHERE tipo = 'agregadora' AND ignorada = 0"
+    ).fetchall():
         faltam = con.execute(
             """WITH RECURSIVE desc(id) AS (
-                   SELECT playlist_id FROM playlists WHERE mae_id = :mae
-                   UNION SELECT p.playlist_id FROM playlists p JOIN desc ON p.mae_id = desc.id)
+                   SELECT playlist_id FROM playlists WHERE mae_id = :mae AND ignorada = 0
+                   UNION SELECT p.playlist_id FROM playlists p JOIN desc ON p.mae_id = desc.id
+                   WHERE p.ignorada = 0)
                SELECT DISTINCT pf.video_id FROM playlist_faixas pf JOIN desc ON pf.playlist_id = desc.id
                WHERE pf.video_id NOT IN (SELECT video_id FROM playlist_faixas WHERE playlist_id = :mae)
                ORDER BY pf.video_id""",

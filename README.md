@@ -37,9 +37,15 @@ uv run curator hierarquia aplicar                   # valida e grava no banco
 uv run curator hierarquia mostrar
 uv run curator hierarquia verificar                 # agregadoras contêm todas as filhas?
 
+# playlists que não são de música (vídeos do YouTube comum, aulas): fora de tudo
+uv run curator playlists ignorar "Valorant Plays"   # aceita várias; `considerar` desfaz
+uv run curator playlists ignoradas
+
 # 4. visão geral
 uv run curator estatisticas
 ```
+
+Uma playlist ignorada some das listagens, do mapa, das receitas, da classificação, das recomendações e do MCP, e nenhum plano mexe nela. Os vídeos que só estão em playlists ignoradas também saem de tudo, mesmo curtidos, e não vão para a fila de análise; quem também está numa playlist normal continua valendo por ela. Análises já feitas ficam guardadas.
 
 A sincronização é total: uma música removida de uma playlist no YouTube Music some do banco. Uma playlist com a mesma contagem, sincronizada há menos de 24 h, não é baixada de novo (`--forcar` ignora esses caches).
 
