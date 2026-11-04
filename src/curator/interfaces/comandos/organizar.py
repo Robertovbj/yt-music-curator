@@ -46,6 +46,14 @@ def reorganizar(
     ),
     plano: bool = typer.Option(False, "--plano", help="Gera um plano com as sugestões de criar e completar."),
     min_cluster: int = typer.Option(12, "--min-cluster", help="Tamanho mínimo de um cluster."),
+    recategorizar: bool = typer.Option(
+        False,
+        "--recategorizar",
+        help="Refaz as filhas pelo som: uma filha nova por cluster, as antigas esvaziadas.",
+    ),
+    selecao: str | None = typer.Option(
+        None, "--selecao", help="HDBSCAN: eom ou leaf (padrão: leaf com --recategorizar, senão eom)."
+    ),
 ) -> None:
     """Dentro da playlist pedida: sugere playlists novas, completar, fundir e dividir (clusters sobrepostos).
 
@@ -55,7 +63,10 @@ def reorganizar(
 
     con = banco()
     escopo = _escopo(con, mae)
-    p = clusters.Parametros(min_cluster_size=min_cluster)
+    selecao = selecao or ("leaf" if recategorizar else "eom")
+    if selecao not in ("eom", "leaf"):
+        falhar("--selecao é eom ou leaf")
+    p = clusters.Parametros(min_cluster_size=min_cluster, selecao=selecao)
     if reagrupar or clusters.ultimo(con, escopo) is None:
         typer.echo("agrupando (UMAP + HDBSCAN)…", err=True)
     try:
@@ -67,6 +78,22 @@ def reorganizar(
     typer.echo(f"agrupamento #{aid}: {len(cs)} cluster(s)")
     for c in cs:
         typer.echo(f"  [{c.cluster_id}] {c.nome} — {len(c.membros)} faixa(s)")
+    if recategorizar:
+        cobertas = {v for c in cs for v in c.membros}
+        total = len(clusters._universo(con, escopo))
+        antigas = reorg.filhas_atuais(con, escopo)
+        typer.echo(f"\n{len(cs)} filha(s) nova(s), cobrindo {len(cobertas)} de {total} faixa(s) (as outras ficam só na mãe);"
+                   f" {len(antigas)} filha(s) atual(is) seriam esvaziadas")  # fmt: skip
+        typer.echo(
+            f'renomeie antes do plano com `curator clusters renomear N "nome" --mae "{mae}"`', err=True
+        )
+        if plano:
+            try:
+                pid = planos.de_recategorizacao(con, escopo, reorg.recategorizar(con, escopo, cs))
+                typer.echo(f"plano #{pid} criado; confira com `curator plano mostrar {pid}` antes de aplicar")
+            except ValueError as e:
+                falhar(str(e))
+        return
     sugestoes = reorg.sugerir(con, cs, escopo, p.jaccard_fusao)
     if sugestoes:
         typer.echo("\nsugestões:")

@@ -7,6 +7,9 @@
 
 Só criar e completar viram operações de plano: fusão e divisão mexem no que você já organizou, então
 ficam como sugestões em texto para você decidir. A comparação usa apenas faixas já analisadas.
+
+`recategorizar` (#74) é o pedido explícito de refazer as filhas de UMA mãe: as filhas atuais não servem de
+referência, cada cluster vira uma filha nova e as antigas são esvaziadas (o que sai delas continua na mãe).
 """
 
 import sqlite3
@@ -15,7 +18,7 @@ from itertools import combinations
 
 from curator.banco import consultas
 from curator.motor import espacos
-from curator.motor.clusters import Cluster, _universo, jaccard, sobreposicoes
+from curator.motor.clusters import Cluster, _universo, jaccard, nomes_unicos, sobreposicoes
 from curator.motor.planos import Operacao
 
 CORRESPONDE = 0.5
@@ -102,3 +105,48 @@ def sugerir(
                 )
             )
     return out
+
+
+def filhas_atuais(con: sqlite3.Connection, mae: str) -> list[str]:
+    """As descendentes da mãe (sem ela), válidas para o motor."""
+    return [
+        r[0]
+        for r in con.execute(
+            """WITH RECURSIVE d(id) AS (
+                   SELECT playlist_id FROM playlists WHERE mae_id = ? AND ignorada = 0
+                   UNION SELECT p.playlist_id FROM playlists p JOIN d ON p.mae_id = d.id WHERE p.ignorada = 0)
+               SELECT id FROM d ORDER BY id""",
+            (mae,),
+        )
+    ]
+
+
+def recategorizar(con: sqlite3.Connection, mae: str, cs: list[Cluster]) -> list[Operacao]:
+    """Uma filha nova por cluster (com todos os membros; a sobreposição vale) e as filhas atuais esvaziadas.
+
+    Ninguém sai da mãe: as faixas já estão nela (o escopo dos clusters é a mãe com as descendentes)."""
+    if not cs:
+        raise ValueError("nenhum cluster: nada para recategorizar")
+    nomes = nomes_unicos(cs)
+    ops: list[Operacao] = []
+    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
+        alvo = f"nova:{nomes[c.cluster_id]}"
+        membros = sorted(c.membros)
+        ops += [
+            Operacao("criar", alvo, titulo=nomes[c.cluster_id]),
+            Operacao("adicionar", alvo, membros, motivo={v: f"cluster [{c.cluster_id}], sim {c.membros[v]:.2f}" for v in membros}),
+        ]  # fmt: skip
+    for pid in filhas_atuais(con, mae):
+        ids = [
+            r[0]
+            for r in con.execute(
+                "SELECT DISTINCT video_id FROM playlist_faixas WHERE playlist_id = ?", (pid,)
+            )
+        ]
+        if ids:
+            ops.append(
+                Operacao(
+                    "remover", pid, sorted(ids), motivo=dict.fromkeys(ids, "recategorização: continua na mãe")
+                )
+            )
+    return ops

@@ -285,6 +285,11 @@ def de_reorganizacao(con: sqlite3.Connection, sugestoes, escopo: str) -> int:
     return criar(con, f"reorganizar:{escopo}", [o for s in sugestoes for o in s.operacoes])
 
 
+def de_recategorizacao(con: sqlite3.Connection, mae: str, ops: list[Operacao]) -> int:
+    """Filhas novas da `mae` a partir dos clusters (#74). Aplicado, as criadas ficam com `mae_id` = mae."""
+    return criar(con, f"recategorizar:{mae}", ops, propagar_agregadoras=False)
+
+
 DESCOBERTAS_CURTIDAS = "Descobertas curtidas"
 
 

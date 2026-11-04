@@ -158,6 +158,12 @@ def aplicar(con: sqlite3.Connection, cli: ClienteYT, plano_id: int) -> Resultado
         con.executemany(
             "UPDATE playlists SET geral = 1 WHERE playlist_id = ?", [(p,) for p in res.criadas.values()]
         )
+    if meta["origem"].startswith("recategorizar:"):
+        # filhas novas da mãe (#74); o hierarquia.toml precisa das mesmas linhas (a CLI as imprime)
+        mae = meta["origem"].split(":", 1)[1]
+        con.executemany(
+            "UPDATE playlists SET mae_id = ? WHERE playlist_id = ?", [(mae, p) for p in res.criadas.values()]
+        )
     con.execute(
         "UPDATE planos SET status = ?, log = ?, criadas = ?, aplicado_em = ? WHERE plano_id = ?",
         (res.status, json.dumps({"operacoes": res.log, "divergencias": res.divergencias}, ensure_ascii=False),
