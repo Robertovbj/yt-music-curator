@@ -72,7 +72,7 @@ def test_historico_conta_recomendacoes_anteriores(con):
     recomendar(con, ["novo1"])
     h = rc.historico(con)
     assert h["novo1"].vezes == 2 and h["novo2"].vezes == 1
-    assert rc.historico(con, antes_de="2000") == {}
+    assert rc.historico(con, ate_id=1) == {}
 
 
 def test_coleta_recente_respeita_o_cache(con):

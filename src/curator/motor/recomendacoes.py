@@ -158,16 +158,15 @@ class Historico:
     ultima: str | None  # criada_em da mais recente
 
 
-def historico(con: sqlite3.Connection, antes_de: str | None = None) -> dict[str, Historico]:
-    """Por faixa: quantas vezes já foi recomendada como nova antes de `antes_de` (padrão: agora)."""
-    antes_de = antes_de or "9999"
+def historico(con: sqlite3.Connection, ate_id: int | None = None) -> dict[str, Historico]:
+    """Por faixa: quantas vezes já foi recomendada como nova antes da recomendação `ate_id` (padrão: todas)."""
     out = {}
     for vid, n, ultima in con.execute(
         """SELECT i.video_id, count(*), max(r.criada_em) FROM recomendacao_itens i
            JOIN recomendacoes r USING (recomendacao_id)
-           WHERE r.status = 'pronta' AND i.conhecida = 0 AND r.criada_em < ?
+           WHERE r.status = 'pronta' AND i.conhecida = 0 AND r.recomendacao_id < ?
            GROUP BY i.video_id""",
-        (antes_de,),
+        (ate_id if ate_id is not None else 2**62,),
     ):
         out[vid] = Historico(n, ultima)
     return out
