@@ -23,6 +23,9 @@ class FalsoYT:
         self.albuns: dict[str, dict] = {}
         self.falhar_album: set[str] = set()
         self.falhar_escrita: set[str] = set()
+        self.radios: dict[str, list[dict]] = {}  # semente → faixas do rádio (sem a própria semente)
+        self.relacionadas: dict[str, list[dict]] = {}
+        self.buscas: dict[str, list[dict]] = {}  # consulta → resultados de search(filter="songs")
         self._seq = 0
         self.chamadas = Counter()
 
@@ -54,6 +57,31 @@ class FalsoYT:
             "trackCount": len(p["tracks"]),
             "tracks": list(p["tracks"]),
         }
+
+    # ------------------------------------------------------------ recomendações (ADR-13)
+
+    def get_watch_playlist(self, videoId=None, playlistId=None, limit=25, radio=False, shuffle=False):
+        self.chamadas["get_watch_playlist"] += 1
+        if videoId not in self.radios:
+            raise Exception("HTTP 404: vídeo indisponível")
+        semente = {"videoId": videoId, "title": f"Semente {videoId}", "length": "3:00", "artists": []}
+        tracks = [semente] + [
+            {k: v for k, v in t.items() if k not in ("duration_seconds", "setVideoId")} | {"length": "3:20"}
+            for t in self.radios[videoId]
+        ]
+        return {"tracks": tracks, "related": f"MPTRt_{videoId}" if videoId in self.relacionadas else None}
+
+    def get_song_related(self, browseId):
+        self.chamadas["get_song_related"] += 1
+        vid = browseId.removeprefix("MPTRt_")
+        return [
+            {"title": "Você também pode gostar", "contents": list(self.relacionadas[vid])},
+            {"title": "Playlists recomendadas", "contents": [{"playlistId": "RDx", "title": "Mix"}]},
+        ]
+
+    def search(self, query, filter=None, limit=20, ignore_spelling=False):
+        self.chamadas["search"] += 1
+        return list(self.buscas.get(query, []))
 
     # ------------------------------------------------------------ escrita (M7)
 

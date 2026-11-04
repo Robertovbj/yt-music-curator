@@ -47,6 +47,20 @@ PADRAO: dict = {
         "limiar_casamento": 0.82,
         "tolerancia_duracao_s": 3,
     },
+    "recomendacoes": {  # ADR-13
+        "fontes": ["yt_radio", "yt_related", "deezer"],
+        "pesos_fontes": {"yt_radio": 1.0, "yt_related": 0.8, "deezer": 0.6},
+        "max_sementes": 5,  # por playlist/cluster/artista
+        "cache_h": 12,  # coleta da mesma semente reaproveitada por este tempo; depois, rádio novo
+        "tamanho": 30,
+        "max_por_artista": 2,
+        "penalidade_repeticao": 0.15,  # por recomendação anterior sem reação (#62)
+        "max_repeticoes": 3,  # depois disso, fora por `pausa_dias`
+        "pausa_dias": 30,
+        "analisar_top": 60,  # modo lento: quantas das melhores candidatas baixar e analisar
+        "deezer_artistas": 3,  # artistas relacionados por artista-semente
+        "deezer_faixas_por_artista": 3,
+    },
     "pasta_local": {
         "caminho": "",
     },

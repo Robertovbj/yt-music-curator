@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from curator.banco.conexao import agora, transacao
+from curator.banco.consultas import BIBLIOTECA
 from curator.coleta.cliente import ClienteYT
 from curator.texto import id_artista
 
@@ -285,16 +286,20 @@ def completar_metadados(
     momento = datetime.now(UTC)
     vencido = (momento - timedelta(days=ttl_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
     agora_s = momento.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # só álbuns da biblioteca: as candidatas de recomendação (ADR-13) não geram buscas a cada sincronização
+    da_biblioteca = f"album_id IN (SELECT album_id FROM faixas WHERE video_id IN ({BIBLIOTECA}))"
     filtro = (
-        ""
+        f"WHERE {da_biblioteca}"
         if forcar
-        else "WHERE (metadados_em IS NULL OR metadados_em < ?) AND (proxima_tentativa_em IS NULL OR proxima_tentativa_em <= ?)"
+        else f"WHERE {da_biblioteca} AND (metadados_em IS NULL OR metadados_em < ?) "
+        "AND (proxima_tentativa_em IS NULL OR proxima_tentativa_em <= ?)"
     )
     pendentes = con.execute(
         f"SELECT album_id, titulo, tentativas FROM albuns {filtro} ORDER BY album_id",
         () if forcar else (vencido, agora_s),
     ).fetchall()
-    r.conta("em_cache", con.execute("SELECT count(*) FROM albuns").fetchone()[0] - len(pendentes))
+    total = con.execute(f"SELECT count(*) FROM albuns WHERE {da_biblioteca}").fetchone()[0]
+    r.conta("em_cache", total - len(pendentes))
 
     for a in pendentes:
         try:
