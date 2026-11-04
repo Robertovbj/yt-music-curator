@@ -150,13 +150,26 @@ def receita_comparar(nome: str) -> None:
 
 @app.command()
 def classificar(
-    mae: str | None = typer.Option(None, "--mae", help="Só entre as filhas desta playlist (id ou título)."),
+    em: list[str] = typer.Option(
+        None, "--em", help="Playlist de destino (id ou título); repita para várias."
+    ),
+    mae: str | None = typer.Option(None, "--mae", help="Entre as filhas desta playlist (id ou título)."),
+    nas_gerais: bool = typer.Option(
+        False, "--nas-gerais", help="Nas playlists gerais (as de `curator playlists sugerir`)."
+    ),
     plano: bool = typer.Option(False, "--plano", help="Gera um plano com as sugestões."),
     como_json: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Sugere onde colocar as curtidas não alocadas (kNN + centroide, limiar por playlist)."""
+    """Sugere em quais das playlists PEDIDAS colocar as curtidas (kNN + centroide, limiar por playlist).
+
+    Com --em/--mae, as curtidas não alocadas; com --nas-gerais, as que ainda não estão em nenhuma geral."""
     con = banco()
-    c = cl.classificar(con, mae=_playlist(con, mae))
+    try:
+        c = cl.classificar(
+            con, mae=_playlist(con, mae), em=[_playlist(con, x) for x in em or []], nas_gerais=nas_gerais
+        )
+    except cl.SemAlvo as e:
+        falhar(str(e))
     if como_json:
         typer.echo(json.dumps([{"video_id": d.video_id, "destinos": [vars(x) for x in d.destinos],
                                  "proximas": [vars(x) for x in d.proximas], "ambigua": d.ambigua} for d in c.decisoes],

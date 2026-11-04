@@ -23,7 +23,11 @@ def _modulos():
     return clusters, reorganizar
 
 
-def _escopo(con, mae: str | None) -> str:
+def _escopo(con, mae: str | None, gerais: bool = False) -> str:
+    if gerais:
+        from curator.motor.clusters import CURTIDAS
+
+        return CURTIDAS
     if mae is None:
         return "biblioteca"
     pid = resolver_playlist(con, mae)
@@ -34,9 +38,7 @@ def _escopo(con, mae: str | None) -> str:
 
 @app.command()
 def reorganizar(
-    mae: str | None = typer.Option(
-        None, "--mae", help="Só dentro desta playlist e das filhas (id ou título)."
-    ),
+    mae: str = typer.Option(..., "--mae", help="A playlist a reorganizar, com as filhas (id ou título)."),
     reagrupar: bool = typer.Option(
         False,
         "--reagrupar",
@@ -45,7 +47,9 @@ def reorganizar(
     plano: bool = typer.Option(False, "--plano", help="Gera um plano com as sugestões de criar e completar."),
     min_cluster: int = typer.Option(12, "--min-cluster", help="Tamanho mínimo de um cluster."),
 ) -> None:
-    """Sugere playlists novas, fusões e divisões a partir de clusters sobrepostos."""
+    """Dentro da playlist pedida: sugere playlists novas, completar, fundir e dividir (clusters sobrepostos).
+
+    Para playlists gerais a partir de todas as curtidas, sem olhar as existentes: `curator playlists sugerir`."""
     clusters, reorg = _modulos()
     from curator.motor import planos
 
@@ -78,14 +82,18 @@ def reorganizar(
 
 @clusters_app.command("mostrar")
 def clusters_mostrar(
-    cluster_id: int | None = typer.Argument(None), mae: str | None = typer.Option(None, "--mae")
+    cluster_id: int | None = typer.Argument(None),
+    mae: str | None = typer.Option(None, "--mae"),
+    gerais: bool = typer.Option(False, "--gerais", help="Os clusters das playlists gerais."),
 ) -> None:
     """Estatísticas do último agrupamento (ou de um cluster)."""
     clusters, _ = _modulos()
     con = banco()
-    aid = clusters.ultimo(con, _escopo(con, mae))
+    aid = clusters.ultimo(con, _escopo(con, mae, gerais))
     if aid is None:
-        falhar("nenhum agrupamento ainda; rode `curator reorganizar`")
+        falhar(
+            "nenhum agrupamento ainda; rode `curator playlists sugerir` ou `curator reorganizar --mae ...`"
+        )
     for c in clusters.carregar(con, aid):
         if cluster_id is None or c.cluster_id == cluster_id:
             typer.echo(f"[{c.cluster_id}] {c.nome} (limiar {c.limiar:.3f})")
@@ -93,11 +101,16 @@ def clusters_mostrar(
 
 
 @clusters_app.command("renomear")
-def clusters_renomear(cluster_id: int, nome: str, mae: str | None = typer.Option(None, "--mae")) -> None:
+def clusters_renomear(
+    cluster_id: int,
+    nome: str,
+    mae: str | None = typer.Option(None, "--mae"),
+    gerais: bool = typer.Option(False, "--gerais", help="Um cluster das playlists gerais."),
+) -> None:
     """Dá um nome seu a um cluster; ele fica em cache pelo núcleo e sobrevive a reagrupamentos."""
     clusters, _ = _modulos()
     con = banco()
-    aid = clusters.ultimo(con, _escopo(con, mae))
+    aid = clusters.ultimo(con, _escopo(con, mae, gerais))
     if aid is None:
         falhar("nenhum agrupamento ainda")
     clusters.renomear(con, aid, cluster_id, nome)

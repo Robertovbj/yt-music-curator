@@ -38,6 +38,7 @@ class Parametros:
     min_samples: int | None = None
     percentil_limiar: float = 10
     jaccard_fusao: float = 0.6
+    selecao: str = "eom"  # HDBSCAN: "eom" (o padrão) ou "leaf" (folhas da hierarquia: grupos mais parelhos)
 
 
 @dataclass
@@ -53,6 +54,9 @@ class Cluster:
     @property
     def hash_nucleo(self) -> str:
         return hashlib.sha256("\n".join(sorted(self.nucleo)).encode()).hexdigest()[:16]
+
+
+CURTIDAS = "curtidas"  # escopo das playlists gerais (#80): todas as curtidas, ignorando as playlists
 
 
 class PoucasFaixas(ValueError):
@@ -78,7 +82,12 @@ def reduzir(X: np.ndarray, p: Parametros, dims: int | None = None) -> np.ndarray
 def particionar(Y: np.ndarray, p: Parametros) -> tuple[np.ndarray, np.ndarray]:
     from sklearn.cluster import HDBSCAN
 
-    h = HDBSCAN(min_cluster_size=p.min_cluster_size, min_samples=p.min_samples, copy=True).fit(Y)
+    h = HDBSCAN(
+        min_cluster_size=p.min_cluster_size,
+        min_samples=p.min_samples,
+        cluster_selection_method=p.selecao,
+        copy=True,
+    ).fit(Y)
     return h.labels_, h.probabilities_
 
 
@@ -194,6 +203,12 @@ def _universo(con: sqlite3.Connection, escopo: str) -> list[str]:
     if escopo == "biblioteca":
         return consultas.utilizaveis(con)
     dislikes = consultas.bloqueadas(con)
+    if escopo == CURTIDAS:  # playlists gerais: só as curtidas, sem olhar playlist nenhuma
+        return [
+            r[0]
+            for r in con.execute("SELECT video_id FROM faixas WHERE curtida = 1 ORDER BY video_id")
+            if r[0] not in dislikes
+        ]
     return [
         r[0]
         for r in con.execute(
@@ -259,6 +274,11 @@ def ultimo(con: sqlite3.Connection, escopo: str = "biblioteca") -> int | None:
         (escopo,),
     ).fetchone()
     return linha[0] if linha else None
+
+
+def ultimo_geral(con: sqlite3.Connection) -> int | None:
+    """O agrupamento que representa a biblioteca inteira: o das playlists gerais (#80), senão o antigo."""
+    return ultimo(con, CURTIDAS) or ultimo(con, "biblioteca")
 
 
 def carregar(con: sqlite3.Connection, agrupamento_id: int) -> list[Cluster]:

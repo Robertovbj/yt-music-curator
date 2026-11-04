@@ -103,7 +103,9 @@ Uma **receita** descreve uma playlist em JSON (o que o Claude vai escrever via M
 ```sh
 uv run curator receita criar dormir.json --pedido "músicas para dormir, sem Hoyoverse"
 uv run curator receita executar Dormir --plano-nova    # lista + plano criando a playlist
-uv run curator classificar --plano                      # onde colocar as curtidas não alocadas
+uv run curator classificar --em "Pop" --em "Rap" --plano  # não alocadas, só nas playlists que você nomear
+uv run curator classificar --mae "Rock - All"            # ... ou entre as filhas de uma mãe
+uv run curator classificar --nas-gerais --plano          # curtidas novas nas playlists gerais (abaixo)
 uv run curator avaliar-classificacao --mae "Rock - All" # leave-one-out nas filhas
 uv run curator plano mostrar                            # o diff, agrupado por playlist
 ```
@@ -122,13 +124,15 @@ uv run ruff check . && uv run ruff format .
 Requer o extra `organizar` (UMAP, scikit-learn, Plotly): `uv sync --extra analise --extra organizar`.
 
 ```sh
-uv run curator reorganizar                 # clusters sobrepostos → criar, completar, fundir, dividir
-uv run curator reorganizar --reagrupar     # recalcula do zero (senão encaixa faixas novas nos clusters salvos)
-uv run curator reorganizar --mae "Rock - All" --plano
-uv run curator clusters mostrar            # estatísticas de cada cluster
-uv run curator clusters renomear 0 "Rock de estrada"
+uv run curator playlists sugerir --plano   # playlists gerais de TODAS as curtidas, ignorando as que existem
+uv run curator clusters renomear 3 "Rock de estrada" --gerais   # dê nomes antes de aplicar o plano
+uv run curator playlists sugerir --min-cluster 25 --reagrupar   # mais playlists, menores
+uv run curator reorganizar --mae "Rock - All" --plano    # dentro de uma playlist sua: criar, completar, fundir, dividir
+uv run curator clusters mostrar --gerais   # estatísticas de cada cluster
 uv run curator visualizar --abrir          # ~/.local/share/yt-music-curator/mapa.html, abre offline
 ```
+
+As playlists que já existem nunca servem de base: o `playlists sugerir` olha só as curtidas, e o plano dele só cria playlists novas. Depois de aplicado, as criadas ficam marcadas como gerais, e a cada leva de curtidas novas o `classificar --nas-gerais` sugere em qual delas cada uma entra. `classificar` e `reorganizar` só mexem nas playlists que você nomear.
 
 O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável), a PCA 2D/3D do espaço interpretável e a vista de valência × excitação, com cores por cluster, playlist, gênero, quadrante, BPM ou "não alocada". Clicar numa faixa mostra as 8 mais parecidas.
 

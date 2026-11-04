@@ -51,12 +51,13 @@ def test_html_autocontido(con, tmp_path):
 
 def test_cli_reorganizar_e_visualizar(con, tmp_path):
     run = CliRunner().invoke
-    r = run(app, ["reorganizar", "--min-cluster", "6", "--plano"])
+    assert run(app, ["reorganizar"]).exit_code != 0  # sem --mae não mexe em nada
+    r = run(app, ["playlists", "sugerir", "--min-cluster", "6", "--plano"])
     assert r.exit_code == 0, r.output
-    assert "agrupamento #1" in r.output and "criar" in r.output and "plano #1 criado" in r.output
-    r = run(app, ["reorganizar", "--min-cluster", "6"])  # reaproveita o agrupamento salvo
+    assert "agrupamento #1" in r.output and "plano #1 criado (só playlists novas)" in r.output
+    r = run(app, ["playlists", "sugerir", "--min-cluster", "6"])  # reaproveita o agrupamento salvo
     assert "agrupamento #1" in r.output
-    r = run(app, ["clusters", "renomear", "0", "Meu cluster"])
+    r = run(app, ["clusters", "renomear", "0", "Meu cluster", "--gerais"])
     assert r.exit_code == 0
     r = run(app, ["visualizar", "--saida", str(tmp_path / "m.html")])
     assert r.exit_code == 0 and (tmp_path / "m.html").exists()

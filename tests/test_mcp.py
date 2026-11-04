@@ -67,19 +67,24 @@ def test_fluxo_receita_cache_e_plano(con):
 
 
 def test_classificar_e_plano(con):
-    c = m.classificar_nao_alocadas()
+    assert "diga em quais playlists" in m.classificar_nao_alocadas()["erros"][0]
+    c = m.classificar_nao_alocadas(playlists=["Calma", "Rock"])
     assert c["total"] == 22 and c["com_destino"] >= 4  # rap não tem playlist
-    p = m.criar_plano_da_classificacao()
+    assert "erros" in m.criar_plano_da_classificacao()
+    p = m.criar_plano_da_classificacao(playlists=["Calma", "Rock"])
     assert p["plano_id"] and "■" in p["diff"]
 
 
-def test_reorganizar_e_renomear(con):
+def test_gerais_e_renomear(con):
     pytest.importorskip("umap")
-    r = m.sugerir_reorganizacao()
-    assert r["clusters"] and r["sugestoes"]
-    cid = r["clusters"][0]["cluster_id"]
-    assert m.renomear_cluster(cid, "Nome da IA")["nome"] == "Nome da IA"
-    assert m.sugerir_reorganizacao()["clusters"][0]["nome"] == "Nome da IA"
+    r = m.sugerir_playlists_gerais(min_cluster=6)
+    assert r["playlists"] and r["curtidas"] == 42
+    cid = r["playlists"][0]["cluster_id"]
+    assert m.renomear_cluster(cid, "Nome da IA", gerais=True)["nome"] == "Nome da IA"
+    assert "Nome da IA" in {p["nome"] for p in m.sugerir_playlists_gerais(min_cluster=6)["playlists"]}
+    p = m.criar_plano_das_gerais(min_cluster=6)
+    assert "Nome da IA (nova)" in p["diff"]
+    assert "erros" in m.sugerir_reorganizacao(mae="não existe")
 
 
 def test_exemplos_validam_contra_o_schema():

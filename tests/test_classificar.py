@@ -23,12 +23,15 @@ def con(tmp_path):
     return con
 
 
+ALVOS = ["PLpesado", "PLcalma", "PLpouca"]  # as raízes, nomeadas
+
+
 def destinos(c, vid):
     return [d.playlist_id for d in next(x for x in c.decisoes if x.video_id == vid).destinos]
 
 
 def test_nao_alocadas_vao_para_a_familia_certa(con):
-    c = cl.classificar(con)
+    c = cl.classificar(con, em=ALVOS)
     assert len(c.decisoes) == 12  # 4 soltas × 3 estilos
     familia = {"rock": {"PLrock", "PLpesado"}, "rap": {"PLrap", "PLpesado"}, "ambient": {"PLcalma"}}
     folha = {"rock": "PLrock", "rap": "PLrap", "ambient": "PLcalma"}
@@ -46,7 +49,7 @@ def test_nao_alocadas_vao_para_a_familia_certa(con):
 
 
 def test_quem_nao_passa_na_filha_fica_na_mae(con):
-    for d in cl.classificar(con).decisoes:
+    for d in cl.classificar(con, em=ALVOS).decisoes:
         if d.video_id.startswith("rap") and "PLrap" not in {x.playlist_id for x in d.destinos}:
             assert [x.playlist_id for x in d.destinos] in ([], ["PLpesado"])
 
@@ -57,7 +60,7 @@ def test_playlist_com_poucos_membros_fica_de_fora(con):
 
 
 def test_deterministico(con):
-    a, b = cl.classificar(con), cl.classificar(con)
+    a, b = cl.classificar(con, em=ALVOS), cl.classificar(con, em=ALVOS)
     assert [(d.video_id, [(x.playlist_id, x.score) for x in d.destinos]) for d in a.decisoes] == [
         (d.video_id, [(x.playlist_id, x.score) for x in d.destinos]) for d in b.decisoes
     ]
@@ -66,7 +69,7 @@ def test_deterministico(con):
 def test_crossover_entra_em_duas_filhas(con):
     """Duas filhas de estilo parecido: a faixa que cabe nas duas entra nas duas (multi-rótulo)."""
     playlist(con, "PLguitarra", "Guitarra", [f"rock{i:02d}" for i in range(8)], mae="PLpesado")
-    c = cl.classificar(con, ids=[f"rock{i:02d}" for i in range(10, 14)], percentil=1)
+    c = cl.classificar(con, ids=[f"rock{i:02d}" for i in range(10, 14)], percentil=1, em=ALVOS)
     assert any({"PLrock", "PLguitarra"} <= set(destinos(c, v)) for v in [d.video_id for d in c.decisoes])
 
 
@@ -95,3 +98,28 @@ def test_avaliacao_leave_one_out(con):
     m = {x.titulo: x for x in cl.avaliar(con)}
     assert m["Rock"].precisao == 1.0 and m["Rock"].revocacao >= 0.8
     assert m["Calma"].precisao == 1.0
+
+
+def test_sem_alvo_nao_sugere_nada(con):
+    with pytest.raises(cl.SemAlvo, match="diga em quais playlists"):
+        cl.classificar(con)
+    with pytest.raises(cl.SemAlvo, match="nenhuma playlist geral"):
+        cl.classificar(con, nas_gerais=True)
+
+
+def test_so_nas_playlists_nomeadas(con):
+    c = cl.classificar(con, em=["PLcalma"])
+    assert {x.playlist_id for d in c.decisoes for x in d.destinos + d.proximas} <= {"PLcalma"}
+    assert c.frias == []  # "Quase vazia" não foi pedida: nem aparece no aviso
+
+
+def test_nas_gerais_usa_as_curtidas_fora_das_gerais(con):
+    # uma geral com rock00–09; rock10–13 são curtidas fora dela, mesmo as que estão em outra playlist
+    playlist(con, "PLgeral", "Geral rock", [f"rock{i:02d}" for i in range(10)])
+    con.execute("UPDATE playlists SET geral = 1 WHERE playlist_id = 'PLgeral'")
+    playlist(con, "PLminha", "Minha", ["rock12"])
+    c = cl.classificar(con, nas_gerais=True)
+    ids = {d.video_id for d in c.decisoes}
+    assert {"rock10", "rock12"} <= ids and not ids & {f"rock{i:02d}" for i in range(10)}
+    assert {x.playlist_id for d in c.decisoes for x in d.destinos} <= {"PLgeral"}
+    assert "PLgeral" in destinos(c, "rock11")

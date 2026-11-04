@@ -56,7 +56,7 @@ def dados(con: sqlite3.Connection) -> dict:
         if vid in em_pl and pid in idx_pl:
             em_pl[vid].append(idx_pl[pid])
 
-    aid = clusters.ultimo(con)
+    aid = clusters.ultimo_geral(con)
     cs = clusters.carregar(con, aid) if aid else []
     em_cl: dict[str, list[int]] = {v: [] for v in ids}
     for i, c in enumerate(cs):
