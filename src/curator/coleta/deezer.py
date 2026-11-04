@@ -33,10 +33,10 @@ class ErroDeezer(RuntimeError):
 class ClienteDeezer:
     """GET com pausa entre chamadas (o limite do Deezer é ~50 por 5 s) e erro claro quando a API recusa."""
 
-    def __init__(self, intervalo_s: float = 0.25, dormir=time.sleep, abrir=urllib.request.urlopen):
+    def __init__(self, intervalo_s: float = 0.25, dormir=time.sleep, abrir=None):
         self.intervalo_s = intervalo_s
         self._dormir = dormir
-        self._abrir = abrir
+        self._abrir = abrir or urllib.request.urlopen
         self._ultima = 0.0
 
     def get(self, caminho: str, **params) -> dict:
