@@ -33,7 +33,7 @@ def _playlists(con: sqlite3.Connection, escopo: str, analisadas: set[str]) -> di
     universo = set(_universo(con, escopo)) if escopo != "biblioteca" else None
     out = {}
     for pid, titulo in con.execute(
-        "SELECT playlist_id, titulo FROM playlists WHERE propria = 1 ORDER BY playlist_id"
+        "SELECT playlist_id, titulo FROM playlists WHERE propria = 1 AND descobertas = 0 ORDER BY playlist_id"
     ):
         membros = {
             r[0] for r in con.execute("SELECT video_id FROM playlist_faixas WHERE playlist_id = ?", (pid,))

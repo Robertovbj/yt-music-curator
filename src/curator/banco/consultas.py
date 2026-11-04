@@ -2,10 +2,13 @@
 
 import sqlite3
 
+# Playlists de descobertas (criadas a partir de recomendações, ADR-13) não contam: o que só está nelas
+# ainda não foi curtido.
 BIBLIOTECA = """
     SELECT video_id FROM faixas WHERE curtida = 1
     UNION
-    SELECT pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id) WHERE p.propria = 1
+    SELECT pf.video_id FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
+    WHERE p.propria = 1 AND p.descobertas = 0
 """
 
 
@@ -51,7 +54,7 @@ def nao_alocadas(con: sqlite3.Connection) -> list[str]:
         con,
         """SELECT f.video_id FROM faixas f WHERE f.curtida = 1 AND f.avaliacao != 'dislike' AND NOT EXISTS (
                SELECT 1 FROM playlist_faixas pf JOIN playlists p USING (playlist_id)
-               WHERE p.propria = 1 AND pf.video_id = f.video_id)
+               WHERE p.propria = 1 AND p.descobertas = 0 AND pf.video_id = f.video_id)
            ORDER BY f.posicao_curtida""",
     )
 

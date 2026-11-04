@@ -83,7 +83,7 @@ def perfis(con: sqlite3.Connection, k: int = K, alfa: float = ALFA, percentil: f
     emb = espacos.embeddings(con)
     sem = (sem or set()) | consultas.com_dislike(con)  # dislikes não puxam o centroide
     pl = con.execute(
-        "SELECT playlist_id, titulo, mae_id FROM playlists WHERE propria = 1 ORDER BY playlist_id"
+        "SELECT playlist_id, titulo, mae_id FROM playlists WHERE propria = 1 AND descobertas = 0 ORDER BY playlist_id"
     ).fetchall()
     filhas = defaultdict(list)
     for p in pl:
@@ -133,7 +133,7 @@ def _raizes(con: sqlite3.Connection, mae: str | None) -> list[str]:
     return [
         r[0]
         for r in con.execute(
-            "SELECT playlist_id FROM playlists WHERE propria = 1 AND mae_id IS NULL ORDER BY playlist_id"
+            "SELECT playlist_id FROM playlists WHERE propria = 1 AND descobertas = 0 AND mae_id IS NULL ORDER BY playlist_id"
         )
     ]
 
