@@ -151,6 +151,26 @@ uv run curator hierarquia corrigir # plano que completa as agregadoras com o que
 
 Playlists criadas por plano são privadas. Planos acima de 200 faixas pedem `--grande`.
 
+### Recomendações (músicas que você ainda não curtiu)
+
+```sh
+# só músicas NOVAS, sem baixar nada (segundos): rádio do YT + Deezer a partir das sementes
+uv run curator recomendar rapido --playlist "Rock - Arena"
+uv run curator recomendar rapido -f VIDEO_ID -f OUTRO_ID --criar-playlist   # + plano de playlist nova "Descobertas · …"
+
+# só músicas NOVAS, baixando e analisando as candidatas antes (depois da biblioteca, na mesma fila)
+uv run curator recomendar lento --artista "HOYO-MiX" --spec perfil.json --aguardar
+
+# misturar novas e curtidas: só com a flag
+uv run curator recomendar rapido --playlist Pop --misturar-curtidas --proporcao-novas 0.3
+
+uv run curator recomendacoes listar        # o que já foi sugerido e o que virou curtida/dislike (após sincronizar)
+uv run curator recomendacoes acerto        # taxa de acerto por fonte (yt_radio, yt_related, deezer) e modo
+uv run curator plano dislikes              # plano que tira das suas playlists o que levou dislike
+```
+
+Toda recomendação mostra o resumo e pede confirmação. Ela nunca entra numa playlist sua existente sem `--adicionar-em X --permitir-novas`. Uma faixa sugerida 3 vezes sem reação fica 30 dias de fora. Os ajustes ficam em `[recomendacoes]` no `config.toml`. O dislike só é visto se a faixa estiver numa playlist sua (limitação da API; ver ADR-03).
+
 ### Backup e outro computador
 
 ```sh
