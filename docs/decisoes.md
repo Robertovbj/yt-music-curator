@@ -290,6 +290,10 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 **Substitui** a heurística do helper (os 15 artistas mais frequentes e o julgamento da IA), que não usava o som e variava a cada execução.
 
+**Avaliação (#28, 2026-11-04, `docs/avaliacao.md`):** k = 10, α = 0,6 e τ no percentil 10 ficaram como estavam, porque não houve gabarito confiável que indicasse outra coisa.
+- Nas filhas do Rock - All, montadas por uma IA, a concordância é muito puxada pelo artista principal. Elas serão refeitas pelo áudio (#74).
+- Nas raízes, montadas pelo usuário, a revocação é ~0,9, mas cada faixa passa no limiar de muitas playlists. Boa parte delas é por franquia e não por som; a calibração disso fica na #75.
+
 ## ADR-07: Sugerir reorganização (clusters sobrepostos)
 
 **Decisão:**
