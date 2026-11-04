@@ -320,6 +320,8 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 **Playlists gerais (#80, 04/11):** `curator playlists sugerir` agrupa só as curtidas analisadas (escopo `curtidas`), ignorando todas as playlists existentes, e o plano só cria playlists novas, marcadas como gerais (`playlists.geral`) ao ser aplicado. Para dar poucas playlists amplas, o HDBSCAN roda no modo "leaf" com tamanho mínimo 40. Na biblioteca real (2.647 curtidas), o modo padrão ("eom") juntava tudo em 2 blocos de 1.100–1.800 faixas com qualquer tamanho mínimo; "leaf" com 40 deu 14 grupos de 100 a 640 faixas, cobrindo 86% das curtidas (40% em mais de uma). `--min-cluster` muda a granularidade; com outros parâmetros, o agrupamento é refeito. Nomes automáticos repetidos são numerados no plano; a IA (ou o usuário) renomeia antes. `curator reorganizar`, que compara com as playlists existentes (completar, fundir, dividir), passou a exigir `--mae`.
 
+**Recategorizar uma mãe (#74, 04/11):** `curator reorganizar --mae X --recategorizar` refaz as filhas de X pelo som, quando o usuário pede aquela playlist. As filhas atuais não servem de referência: cada cluster (HDBSCAN "leaf", mínimo 12; no Rock - All, 5 grupos de 14 a 80 faixas cobrindo 88% das 171) vira uma filha nova, e as antigas são esvaziadas. Nada sai da mãe. O plano é aplicado pelo usuário; ao aplicar, as novas ganham `mae_id` = X e a CLI imprime os blocos para o `hierarquia.toml`. Parâmetros diferentes dos do último agrupamento do escopo recalculam os clusters.
+
 ## ADR-08: Obtenção de áudio sem bloqueio
 
 **Requisito:** sempre a **faixa inteira**. Ordem de tentativas: YouTube direto → YouTube por proxies → outros provedores sem DRM.
@@ -533,6 +535,8 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - **Misturar:** as faixas da biblioteca que os rádios trouxeram, completadas pelo motor (parecidas com as sementes, com as análises que já existem) e intercaladas às novas na proporção pedida (padrão 50%).
 
 **Destino:** conforme o comando. Por padrão, só a lista. Com `--criar-playlist` (MCP: `criar_plano_da_recomendacao`), um plano de playlist **nova** "Descobertas · <pedido>", que é marcada `descobertas` ao ser aplicada. Acrescentar recomendações a uma playlist sua existente é recusado pelo próprio plano (`NovasNaBiblioteca`), salvo com `--adicionar-em X --permitir-novas`.
+
+**Descobertas curtidas (#73):** `curator recomendacoes curtidas --plano` junta numa playlist "Descobertas curtidas" o que foi recomendado como novo (`conhecida = 0`) e virou curtida depois de sincronizar, na ordem da primeira recomendação. Ela é de descobertas (fora de receitas, classificação e clusters); se já existe, o plano só acrescenta as que faltam.
 
 **Histórico e repetição**
 - Toda recomendação fica salva, com as coletas usadas e a posição, score, fontes e votos de cada faixa.

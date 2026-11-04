@@ -278,6 +278,38 @@ def acerto(como_json: bool = O_JSON) -> None:
     typer.echo("os pesos das fontes ficam em [recomendacoes.pesos_fontes] no config.toml")
 
 
+@historico_app.command("curtidas")
+def curtidas(
+    plano: bool = typer.Option(
+        False, "--plano", help="Plano que cria (ou completa) a playlist de descobertas curtidas."
+    ),
+    nome: str = typer.Option(planos.DESCOBERTAS_CURTIDAS, "--nome", help="Nome da playlist."),
+) -> None:
+    """Músicas que vieram de recomendação como novas e que você curtiu depois (#73)."""
+    con = banco()
+    ids = rc.descobertas_curtidas(con)
+    typer.echo(f"{len(ids)} música(s) recomendada(s) como nova(s) e curtida(s) depois")
+    for rotulo in _rotulos(con, ids):
+        typer.echo(f"  {rotulo}")
+    if plano:
+        try:
+            typer.echo(
+                f"plano #{planos.de_descobertas_curtidas(con, nome)} criado; veja com `curator plano mostrar`"
+            )
+        except ValueError as e:
+            falhar(str(e))
+
+
+def _rotulos(con, ids: list[str]) -> list[str]:
+    if not ids:
+        return []
+    linhas = {
+        r["video_id"]: f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])}"
+        for r in con.execute(f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})", ids)
+    }  # fmt: skip
+    return [linhas.get(v, v) for v in ids]
+
+
 @historico_app.command("concluir")
 def concluir(
     rid: int,

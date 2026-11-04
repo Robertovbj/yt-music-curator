@@ -128,11 +128,12 @@ uv run curator playlists sugerir --plano   # playlists gerais de TODAS as curtid
 uv run curator clusters renomear 3 "Rock de estrada" --gerais   # dê nomes antes de aplicar o plano
 uv run curator playlists sugerir --min-cluster 25 --reagrupar   # mais playlists, menores
 uv run curator reorganizar --mae "Rock - All" --plano    # dentro de uma playlist sua: criar, completar, fundir, dividir
+uv run curator reorganizar --mae "Rock - All" --recategorizar --plano   # refaz as filhas pelo som
 uv run curator clusters mostrar --gerais   # estatísticas de cada cluster
 uv run curator visualizar --abrir          # ~/.local/share/yt-music-curator/mapa.html, abre offline
 ```
 
-As playlists que já existem nunca servem de base: o `playlists sugerir` olha só as curtidas, e o plano dele só cria playlists novas. Depois de aplicado, as criadas ficam marcadas como gerais, e a cada leva de curtidas novas o `classificar --nas-gerais` sugere em qual delas cada uma entra. `classificar` e `reorganizar` só mexem nas playlists que você nomear.
+As playlists que já existem nunca servem de base: o `playlists sugerir` olha só as curtidas, e o plano dele só cria playlists novas. Depois de aplicado, as criadas ficam marcadas como gerais, e a cada leva de curtidas novas o `classificar --nas-gerais` sugere em qual delas cada uma entra. `classificar` e `reorganizar` só mexem nas playlists que você nomear. O `--recategorizar` cria uma filha nova por cluster e esvazia as filhas antigas (o que sai delas continua na mãe); depois de aplicar o plano, o comando imprime as linhas para o `hierarquia.toml`.
 
 O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável), a PCA 2D/3D do espaço interpretável e a vista de valência × excitação, com cores por cluster, playlist, gênero, quadrante, BPM ou "não alocada". Clicar numa faixa mostra as 8 mais parecidas.
 
@@ -178,6 +179,7 @@ uv run curator recomendar rapido --playlist Pop --misturar-curtidas --proporcao-
 
 uv run curator recomendacoes listar        # o que já foi sugerido e o que virou curtida/dislike (após sincronizar)
 uv run curator recomendacoes acerto        # taxa de acerto por fonte (yt_radio, yt_related, deezer) e modo
+uv run curator recomendacoes curtidas --plano   # playlist "Descobertas curtidas": recomendadas que você curtiu
 uv run curator plano dislikes              # plano que tira das suas playlists o que levou dislike
 ```
 

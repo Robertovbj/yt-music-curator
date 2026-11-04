@@ -306,6 +306,19 @@ def plano_aplicar(
     for d in res.divergencias:
         aviso(d)
     typer.echo(f"plano #{plano_id}: {res.status}. Para voltar atrás: `curator plano desfazer {plano_id}`")
+    if meta["origem"].startswith("recategorizar:") and res.criadas:
+        from curator.banco import hierarquia
+
+        mae = meta["origem"].split(":", 1)[1]
+        blocos = [
+            hierarquia.bloco_toml(p, mae=mae)
+            for p in con.execute(
+                f"SELECT playlist_id, titulo FROM playlists WHERE playlist_id IN ({','.join('?' * len(res.criadas))})",
+                list(res.criadas.values()),
+            )
+        ]
+        typer.echo("\nacrescente ao hierarquia.toml (as filhas antigas, agora vazias, podem sair dele):\n")
+        typer.echo("\n".join(blocos))
     if res.status != "aplicado":
         raise typer.Exit(1)
 

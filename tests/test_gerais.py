@@ -55,7 +55,7 @@ def test_nomes_repetidos_sao_numerados():
         clusters.Cluster(i, [], None, 0, {f"v{i}{j}": 1.0 for j in range(3 - i)}, "Rock · calmo")
         for i in range(3)
     ]
-    assert sorted(gerais._nomes_unicos(cs).values()) == [
+    assert sorted(clusters.nomes_unicos(cs).values()) == [
         "Rock · calmo",
         "Rock · calmo (2)",
         "Rock · calmo (3)",

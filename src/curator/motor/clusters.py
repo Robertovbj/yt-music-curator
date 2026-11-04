@@ -327,6 +327,17 @@ def atualizar(con: sqlite3.Connection, agrupamento_id: int) -> int:
     return inseridos
 
 
+def nomes_unicos(cs: list[Cluster]) -> dict[int, str]:
+    """Dois clusters com o mesmo nome virariam a mesma playlist num plano: numera os repetidos (o maior fica sem
+    número)."""
+    vistos: dict[str, int] = {}
+    out = {}
+    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
+        n = vistos[c.nome] = vistos.get(c.nome, 0) + 1
+        out[c.cluster_id] = c.nome if n == 1 else f"{c.nome} ({n})"
+    return out
+
+
 def renomear(
     con: sqlite3.Connection, agrupamento_id: int, cluster_id: int, nome: str, origem: str = "usuario"
 ) -> None:
@@ -338,8 +349,14 @@ def renomear(
 
 def obter(con: sqlite3.Connection, escopo: str = "biblioteca", p: Parametros = Parametros(),
           reagrupar: bool = False) -> tuple[int, list[Cluster], int]:  # fmt: skip
-    """(agrupamento_id, clusters, faixas novas encaixadas): reaproveita o último agrupamento, salvo `reagrupar`."""
+    """(agrupamento_id, clusters, faixas novas encaixadas): reaproveita o último agrupamento do escopo, salvo
+    `reagrupar` ou parâmetros diferentes dos que ele usou."""
     aid = ultimo(con, escopo)
+    if aid is not None and not reagrupar:
+        salvos = con.execute(
+            "SELECT parametros FROM agrupamentos WHERE agrupamento_id = ?", (aid,)
+        ).fetchone()[0]
+        reagrupar = json.loads(salvos) != asdict(p)
     if aid is None or reagrupar:
         cs = calcular(con, escopo, p)
         return salvar(con, cs, escopo, p), cs, 0

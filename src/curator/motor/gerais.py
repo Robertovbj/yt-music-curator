@@ -10,9 +10,8 @@ marcadas como gerais (`playlists.geral`), e `curator classificar --nas-gerais` p
 curtidas novas.
 """
 
-import json
 import sqlite3
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 from curator.motor import clusters
 from curator.motor.clusters import CURTIDAS, Cluster, Parametros
@@ -29,31 +28,14 @@ def parametros(min_cluster: int | None = None) -> Parametros:
 def obter(
     con: sqlite3.Connection, p: Parametros = PARAMETROS, reagrupar: bool = False
 ) -> tuple[int, list[Cluster], int]:
-    """(agrupamento_id, clusters, faixas novas encaixadas). Reaproveita o último agrupamento das gerais se os
-    parâmetros forem os mesmos; com outros parâmetros (ou `reagrupar`), recalcula."""
-    aid = clusters.ultimo(con, CURTIDAS)
-    if aid is not None and not reagrupar:
-        salvos = json.loads(
-            con.execute("SELECT parametros FROM agrupamentos WHERE agrupamento_id = ?", (aid,)).fetchone()[0]
-        )
-        reagrupar = salvos != asdict(p)
+    """(agrupamento_id, clusters, faixas novas encaixadas). Outros parâmetros (ou `reagrupar`) recalculam."""
     return clusters.obter(con, CURTIDAS, p, reagrupar)
-
-
-def _nomes_unicos(cs: list[Cluster]) -> dict[int, str]:
-    """Dois clusters com o mesmo nome automático virariam a mesma playlist no plano: numera os repetidos."""
-    vistos: dict[str, int] = {}
-    out = {}
-    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
-        n = vistos[c.nome] = vistos.get(c.nome, 0) + 1
-        out[c.cluster_id] = c.nome if n == 1 else f"{c.nome} ({n})"
-    return out
 
 
 def plano(con: sqlite3.Connection, agrupamento_id: int, cs: list[Cluster]) -> int:
     """Plano que cria uma playlist nova por cluster, com todos os membros (a sobreposição vale: uma faixa pode ir
     para mais de uma). Não toca nenhuma playlist existente."""
-    nomes = _nomes_unicos(cs)
+    nomes = clusters.nomes_unicos(cs)
     ops = []
     for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
         alvo = f"nova:{nomes[c.cluster_id]}"
