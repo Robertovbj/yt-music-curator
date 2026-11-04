@@ -178,6 +178,7 @@ uv run curator recomendar rapido --playlist Pop --misturar-curtidas --proporcao-
 
 uv run curator recomendacoes listar        # o que já foi sugerido e o que virou curtida/dislike (após sincronizar)
 uv run curator recomendacoes acerto        # taxa de acerto por fonte (yt_radio, yt_related, deezer) e modo
+uv run curator recomendacoes curtidas --plano   # playlist "Descobertas curtidas": recomendadas que você curtiu
 uv run curator plano dislikes              # plano que tira das suas playlists o que levou dislike
 ```
 

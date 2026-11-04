@@ -148,7 +148,7 @@ def aplicar(con: sqlite3.Connection, cli: ClienteYT, plano_id: int) -> Resultado
             res.divergencias.append(f"{alvo}: {len(faltam)} faixa(s) não apareceram depois de adicionar")
         if o.tipo == "remover" and (ficaram := [v for v in o.video_ids if v in ids]):
             res.divergencias.append(f"{alvo}: {len(ficaram)} faixa(s) continuam depois de remover")
-    if meta["origem"].startswith("recomendacao:"):
+    if meta["origem"].startswith(("recomendacao:", "descobertas-curtidas")):
         # o que só está nelas não conta como biblioteca: ouvir não é curtir (ADR-13)
         con.executemany(
             "UPDATE playlists SET descobertas = 1 WHERE playlist_id = ?", [(p,) for p in res.criadas.values()]

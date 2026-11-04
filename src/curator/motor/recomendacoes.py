@@ -135,6 +135,22 @@ STATUS_SQL = """
 """
 
 
+def descobertas_curtidas(con: sqlite3.Connection) -> list[str]:
+    """Músicas recomendadas como novas (`conhecida = 0`) que hoje estão curtidas, na ordem da primeira vez em que
+    foram recomendadas (#73). Dislikes e vídeos de playlists ignoradas ficam de fora."""
+    from curator.banco.consultas import IGNORADAS
+
+    return [
+        r[0]
+        for r in con.execute(
+            f"""SELECT i.video_id FROM recomendacao_itens i JOIN faixas f USING (video_id)
+                WHERE i.conhecida = 0 AND f.curtida = 1 AND f.avaliacao != 'dislike'
+                  AND i.video_id NOT IN ({IGNORADAS})
+                GROUP BY i.video_id ORDER BY min(i.recomendacao_id * 100000 + i.posicao), i.video_id"""
+        )
+    ]
+
+
 def itens(con: sqlite3.Connection, rid: int) -> list[dict]:
     """Itens de uma recomendação, na ordem, com o status atual."""
     linhas = con.execute(

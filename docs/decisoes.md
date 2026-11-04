@@ -534,6 +534,8 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 
 **Destino:** conforme o comando. Por padrão, só a lista. Com `--criar-playlist` (MCP: `criar_plano_da_recomendacao`), um plano de playlist **nova** "Descobertas · <pedido>", que é marcada `descobertas` ao ser aplicada. Acrescentar recomendações a uma playlist sua existente é recusado pelo próprio plano (`NovasNaBiblioteca`), salvo com `--adicionar-em X --permitir-novas`.
 
+**Descobertas curtidas (#73):** `curator recomendacoes curtidas --plano` junta numa playlist "Descobertas curtidas" o que foi recomendado como novo (`conhecida = 0`) e virou curtida depois de sincronizar, na ordem da primeira recomendação. Ela é de descobertas (fora de receitas, classificação e clusters); se já existe, o plano só acrescenta as que faltam.
+
 **Histórico e repetição**
 - Toda recomendação fica salva, com as coletas usadas e a posição, score, fontes e votos de cada faixa.
 - "Já ouvi" = curti depois. O status de cada item é recalculado a cada leitura, depois de `curator sincronizar`: `curtida`, `dislike`, `em_playlist` (pus numa playlist minha comum) ou `sem_reacao`.

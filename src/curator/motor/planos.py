@@ -283,3 +283,28 @@ def de_recomendacao(
 
 def de_reorganizacao(con: sqlite3.Connection, sugestoes, escopo: str) -> int:
     return criar(con, f"reorganizar:{escopo}", [o for s in sugestoes for o in s.operacoes])
+
+
+DESCOBERTAS_CURTIDAS = "Descobertas curtidas"
+
+
+def de_descobertas_curtidas(con: sqlite3.Connection, nome: str = DESCOBERTAS_CURTIDAS) -> int:
+    """Plano com as músicas que vieram de recomendação como novas e foram curtidas depois (#73). Se a playlist
+    de descobertas com esse nome já existe, só acrescenta as que faltam; senão, cria. Aplicada, fica marcada
+    como de descobertas (fora de receitas, classificação e clusters)."""
+    from curator.motor import recomendacoes as rc
+
+    ids = rc.descobertas_curtidas(con)
+    if not ids:
+        raise ValueError(
+            "nenhuma música recomendada como nova foi curtida ainda (rode `curator sincronizar`)"
+        )
+    existe = con.execute(
+        "SELECT playlist_id FROM playlists WHERE propria = 1 AND descobertas = 1 AND titulo = ?", (nome,)
+    ).fetchone()
+    alvo = existe[0] if existe else f"nova:{nome}"
+    ops = [] if existe else [Operacao("criar", alvo, titulo=nome)]
+    ops.append(
+        Operacao("adicionar", alvo, ids, motivo=dict.fromkeys(ids, "recomendada como nova e curtida depois"))
+    )
+    return criar(con, "descobertas-curtidas", ops, propagar_agregadoras=False)
