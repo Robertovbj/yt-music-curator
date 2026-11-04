@@ -64,6 +64,10 @@ PADRAO: dict = {
         "conferir_avaliacao": True,
         "conferir_validade_dias": 7,
         "conferir_por_rodada": 100,  # quantas recomendadas sem reação cada `sincronizar` confere
+        # penalidade por parecer com o que levou dislike (#61)
+        "dislike_peso_artista": 0.5,  # × fração de dislikes entre as faixas avaliadas do artista
+        "dislike_peso_som": 0.5,  # quando a vizinha mais parecida (embedding) é um dislike
+        "dislike_margem_som": 0.1,
     },
     "pasta_local": {
         "caminho": "",

@@ -5,8 +5,9 @@
    curtidas) não baixam de novo: a análise nunca é apagada (#59).
 2. A recomendação fica "aguardando_analise" até a fila terminar; `concluir` fecha com o que já tem.
 3. Ordem final = 0,6 × motor (similaridade com as sementes analisadas, perfil-alvo e gêneros, como numa
-   receita) + 0,4 × coleta, com a mesma penalidade de repetição do modo rápido. Dislikes ficam fora: a
-   avaliação de cada candidata é conferida no YT antes de ela ir para a fila.
+   receita) + 0,4 × coleta, com as mesmas penalidades do modo rápido (repetição e semelhança com dislikes,
+   agora também pelo som, já que as candidatas foram analisadas). Dislikes ficam fora: a avaliação de cada
+   candidata é conferida no YT antes de ela ir para a fila.
 """
 
 import json

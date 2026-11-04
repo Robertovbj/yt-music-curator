@@ -14,7 +14,7 @@ Sempre fora: faixas com dislike, as próprias sementes e o que já foi recomenda
 
 Dislike fora das playlists (#60): o rádio não mostra dislike, então antes de salvar cada música nova da lista
 tem a avaliação conferida no botão de like do player; as que vierem com dislike (ou já curtidas) saem e o
-ranking é refeito.
+ranking é refeito. Parecer com o que levou dislike também custa (#61, `fatores_dislike`).
 Mesmo snapshot de coletas + mesmo histórico → mesma lista (desempate por video_id).
 """
 
@@ -126,6 +126,54 @@ def _meta(con: sqlite3.Connection, ids: list[str]) -> dict[str, dict]:
     return out
 
 
+def fatores_dislike(con: sqlite3.Connection, ids: list[str], cfg: dict) -> dict[str, float]:
+    """Penalidade (fator 0..1) por parecer com o que levou dislike, a partir dos seus próprios dados (#61):
+
+    - artista: peso × fração de dislikes entre as faixas avaliadas do artista (curtidas + dislikes). Um dislike
+      num artista com 400 curtidas quase não pesa; um artista só com dislikes pesa inteiro;
+    - som: se a candidata já tem análise e a faixa mais parecida com ela (embedding) é um dislike, e não uma da
+      biblioteca, peso × (diferença de similaridade / margem), até o peso inteiro.
+    """
+    r = cfg["recomendacoes"]
+    if not ids or not consultas.com_dislike(con):
+        return {}
+    avaliadas = {
+        a: (d, c)
+        for a, d, c in con.execute(
+            """SELECT fa.artista_id, sum(f.avaliacao = 'dislike'), sum(f.curtida = 1 AND f.avaliacao != 'dislike')
+               FROM faixa_artistas fa JOIN faixas f USING (video_id) GROUP BY fa.artista_id
+               HAVING sum(f.avaliacao = 'dislike') > 0"""
+        )
+    }
+    out: dict[str, float] = {}
+    for i in range(0, len(ids), 900):
+        lote = ids[i : i + 900]
+        for vid, art in con.execute(
+            f"SELECT video_id, artista_id FROM faixa_artistas WHERE video_id IN ({','.join('?' * len(lote))})",
+            lote,
+        ):
+            if art in avaliadas:
+                d, c = avaliadas[art]
+                out[vid] = min(out.get(vid, 1.0), 1 - r["dislike_peso_artista"] * d / (d + c))
+    import numpy as np
+
+    from curator.motor import espacos
+
+    emb = espacos.embeddings(con)
+    dislikes = [v for v in sorted(consultas.com_dislike(con)) if v in emb.indice]
+    gosto = [v for v in espacos.da_biblioteca(con) if v in emb.indice]
+    analisadas = [v for v in ids if v in emb.indice]
+    if dislikes and gosto and analisadas:
+        C = np.stack([emb.linha(v) for v in analisadas])
+        s_dis = (C @ np.stack([emb.linha(v) for v in dislikes]).T).max(axis=1)
+        s_gos = (C @ np.stack([emb.linha(v) for v in gosto]).T).max(axis=1)
+        for v, a, b in zip(analisadas, s_dis, s_gos, strict=True):
+            if a > b:
+                f = 1 - r["dislike_peso_som"] * min(1.0, float(a - b) / r["dislike_margem_som"])
+                out[v] = out.get(v, 1.0) * f
+    return {v: round(f, 6) for v, f in out.items() if f < 1}
+
+
 @dataclass
 class Ranking:
     itens: list[rc.ItemRecomendado]
@@ -159,6 +207,7 @@ def candidatas(
     pen = cfg["recomendacoes"]["penalidade_repeticao"]
     proibidos = [normalizar(a) for a in p.excluir_artistas]
     maior = max((a.score for a in agregados.values()), default=1.0) or 1.0
+    penalidade = fatores_dislike(con, sorted(agregados), cfg)
     rk = Ranking([])
     for vid, a in agregados.items():
         m = meta.get(vid)
@@ -187,8 +236,9 @@ def candidatas(
             rk.descartes["recomendada demais sem reação"] += 1
             continue
         vezes = h.vezes if h else 0
-        score = a.score / maior * (1 - pen) ** vezes
-        comp = {"coleta": round(a.score / maior, 6)}
+        f_dislike = penalidade.get(vid, 1.0)
+        score = a.score / maior * (1 - pen) ** vezes * f_dislike
+        comp = {"coleta": round(a.score / maior, 6)} | ({"dislike": f_dislike} if f_dislike < 1 else {})
         rk.itens.append(rc.ItemRecomendado(
             vid, round(score, 6), sorted(a.fontes), len(a.sementes), vezes, conhecidas, comp,
         ))  # fmt: skip
