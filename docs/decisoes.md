@@ -486,6 +486,12 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
   - camada opcional com os centroides das playlists.
 - **Segunda vista:** um mapa **valência × excitação** (Russell), com eixos reais e sem UMAP, interpretável diretamente.
 - **Espaço selecionável:** embedding EffNet, embedding MusiCNN ou espaço semântico interpretável (ADR-04), para comparar como cada um agrupa as músicas.
+- **Significado dos eixos (#57):** os eixos do UMAP não significam nada por construção (ele só preserva vizinhanças, e a projeção pode sair girada ou espelhada). Então, depois de projetar:
+  - a nuvem é centrada, girada para os eixos principais dela (PCA dos próprios pontos) e cada eixo é orientado para crescer com a energia; mesmos pontos → mesma orientação;
+  - cada eixo ganha a correlação de Spearman com as 16 features escalares e com a probabilidade de cada gênero-pai (soma do Discogs400). O rótulo cita as 2–3 mais fortes com o sentido (↑/↓); abaixo de |ρ| = 0,3, "sem direção clara";
+  - isso é calculado no Python e guardado em `projecao_eixos`, com o mesmo `hash_biblioteca` da projeção. Uma projeção em cache sem os eixos da versão atual é refeita.
+- **Vista PCA do espaço interpretável (#57):** SVD exato do espaço interpretável, em 2D e 3D. Cada eixo é uma combinação exata das features, mostrada com os maiores pesos, o sinal e a variância explicada; o sinal de cada componente põe o maior peso positivo, então mesmos dados → mesmos eixos. Na biblioteca real (04/11), o PC1 (32% da variância) é energia/envolvimento contra tristeza/relaxamento, o mesmo que o eixo 1 do UMAP acompanha nos três espaços (ρ 0,84–0,90).
+- O painel "Como ler este mapa" explica a vista atual e traz a tabela completa das correlações.
 
 ## ADR-12: Segurança e higiene
 

@@ -130,7 +130,9 @@ uv run curator clusters renomear 0 "Rock de estrada"
 uv run curator visualizar --abrir          # ~/.local/share/yt-music-curator/mapa.html, abre offline
 ```
 
-O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável) e a vista de valência × excitação, com cores por cluster, playlist, gênero, quadrante, BPM ou "não alocada". Clicar numa faixa mostra as 8 mais parecidas.
+O mapa tem UMAP 2D/3D em três espaços (EffNet, MusiCNN, interpretável), a PCA 2D/3D do espaço interpretável e a vista de valência × excitação, com cores por cluster, playlist, gênero, quadrante, BPM ou "não alocada". Clicar numa faixa mostra as 8 mais parecidas.
+
+Cada eixo tem um rótulo com o que ele acompanha nos dados, como `eixo 1: ↑ energia, ↓ relaxado (ρ 0,86)`. No UMAP, o rótulo vem da correlação de Spearman com as features e os gêneros-pai, e a nuvem é girada e orientada para crescer com a energia, então regerar dá a mesma orientação. Na PCA, cada eixo é uma combinação exata das features, com os pesos e a variância explicada. O painel "Como ler este mapa" tem a tabela completa.
 
 ### Claude via MCP
 
