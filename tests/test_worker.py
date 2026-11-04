@@ -64,6 +64,24 @@ def test_fluxo_feliz_grava_e_apaga_audio(con, cfg):
     assert con.execute("SELECT uso_hoje, sucessos FROM proxies WHERE nome = 'direta'").fetchone()[:] == (2, 2)
 
 
+def test_pausa_propria_da_saida_substitui_a_do_fila(con, cfg):
+    cfg["proxy"] = [
+        {"nome": "lenta", "url": "socks5://10.0.0.1:1080", "intervalo_min_s": 40, "intervalo_max_s": 60}
+    ]
+    yt = ProvedorFalso("youtube_music", ["ok", "ok", "ok"])
+    esperas = []
+    w = Worker(
+        con, cfg, AnalisadorFalso(), {yt.nome: yt}, relogio=Relogio(), dormir=esperas.append, saida="lenta"
+    )
+    w.rodar(limite=3)
+    assert len(esperas) == 2 and all(40 <= e <= 60 for e in esperas)
+    w2, esperas2 = worker(
+        con, cfg, [ProvedorFalso("youtube_music", ["ok", "ok"])]
+    )  # sem saída fixa: a do [fila]
+    w2.rodar(limite=2)
+    assert all(cfg["fila"]["intervalo_min_s"] <= e <= cfg["fila"]["intervalo_max_s"] for e in esperas2)
+
+
 def test_progresso_uma_linha_por_faixa(con, cfg):
     yt = ProvedorFalso("youtube_music", ["ok", "indisponivel"])
     w, _ = worker(con, cfg, [yt])

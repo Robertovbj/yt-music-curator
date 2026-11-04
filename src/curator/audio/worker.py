@@ -217,9 +217,16 @@ class Worker:
                 )
             restam = self.comp.limite is None or self.comp.processadas < self.comp.limite
             if usou_rede and not self.parar and restam:
-                f = self.cfg["fila"]
-                self.dormir(self.rng.uniform(f["intervalo_min_s"], f["intervalo_max_s"]))
+                self.dormir(self._pausa())
         return rel
+
+    def _pausa(self) -> float:
+        """Entre downloads: a pausa do `[[proxy]]` desta saída, se ele definir uma, senão a do `[fila]`."""
+        f = self.cfg["fila"]
+        p = next((p for p in self.cfg.get("proxy", []) if p.get("nome") == self.saida), {})
+        return self.rng.uniform(
+            p.get("intervalo_min_s", f["intervalo_min_s"]), p.get("intervalo_max_s", f["intervalo_max_s"])
+        )
 
     def _aguardar_liberacao(self, ate: datetime | None) -> bool:
         """Modo serviço: dorme até a saída sair da quarentena ou a cota virar. False = desistir (parada/limite)."""

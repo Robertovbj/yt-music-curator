@@ -63,6 +63,8 @@ cota_diaria = 200
 [[proxy]]
 nome = "vps"
 url = "socks5://usuario:senha@host:1080"
+intervalo_min_s = 40   # opcional: pausa própria para uma saída mais visada (senão vale a do [fila])
+intervalo_max_s = 60
 
 [pasta_local]
 caminho = "~/Música"   # depois: uv run curator pasta-local

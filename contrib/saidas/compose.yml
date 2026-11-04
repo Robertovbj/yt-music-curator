@@ -12,6 +12,7 @@
 # No config.toml do curator:
 #   [[proxy]]  nome = "vpn"      url = "socks5://127.0.0.1:1081"
 #   [[proxy]]  nome = "celular"  url = "socks5://127.0.0.1:1082"
+# Opcionais em cada [[proxy]]: cota_diaria, intervalo_min_s e intervalo_max_s (senão valem os do [fila]).
 name: curator-saidas
 
 services:
