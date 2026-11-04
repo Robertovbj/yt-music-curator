@@ -1,8 +1,9 @@
 """Visualizador da biblioteca (ADR-11, #40 e #41): um HTML autocontido que abre offline.
 
 O plotly.min.js vai embutido (sai do pacote `plotly`). Os dados vão num <script type="application/json">:
-faixas, playlists, clusters do último agrupamento, gênero dominante, coordenadas 2D/3D de cada espaço e os
-vizinhos mais próximos de cada faixa (no embedding EffNet), para as linhas que aparecem ao clicar.
+faixas, playlists, clusters do último agrupamento, gênero dominante, coordenadas 2D/3D de cada espaço (UMAP e a
+PCA do espaço interpretável), o que cada eixo acompanha (#57) e os vizinhos mais próximos de cada faixa (no
+embedding EffNet), para as linhas que aparecem ao clicar.
 """
 
 import json
@@ -16,7 +17,7 @@ import numpy as np
 
 from curator.banco import consultas
 from curator.motor import clusters, espacos
-from curator.visual import projecoes
+from curator.visual import eixos, projecoes
 
 K_VIZINHOS = 8
 MAX_GENEROS = 11
@@ -84,16 +85,24 @@ def dados(con: sqlite3.Connection) -> dict:
             "na": v in nao_alocadas,
         })  # fmt: skip
 
-    coords = {}
+    def alinhar(m: espacos.Matriz) -> list:
+        arr = [None] * len(ids)
+        for i, v in enumerate(m.ids):
+            if v in pos:
+                arr[pos[v]] = [round(float(x), 4) for x in m.X[i]]
+        return arr
+
+    coords, rotulos = {}, {}
     for espaco in projecoes.ESPACOS:
-        coords[espaco] = {}
+        coords[espaco], rotulos[espaco] = {}, {}
         for dims in (2, 3):
-            m = projecoes.projetar(con, espaco, dims)
-            arr = [None] * len(ids)
-            for i, v in enumerate(m.ids):
-                if v in pos:
-                    arr[pos[v]] = [round(float(x), 4) for x in m.X[i]]
-            coords[espaco][str(dims)] = arr
+            coords[espaco][str(dims)] = alinhar(projecoes.projetar(con, espaco, dims))
+            rotulos[espaco][str(dims)] = projecoes.eixos(con, espaco, dims)
+    coords["pca"], rotulos["pca"] = {}, {}
+    for dims in (2, 3):
+        m, ex = eixos.pca_interpretavel(con, ids, dims)
+        coords["pca"][str(dims)] = alinhar(m)
+        rotulos["pca"][str(dims)] = [e.como_dict() for e in ex]
 
     emb = espacos.embeddings(con)
     vizinhos = []
@@ -112,6 +121,8 @@ def dados(con: sqlite3.Connection) -> dict:
         "clusters": [c.nome for c in cs],
         "generos": generos,
         "coords": coords,
+        "eixos": rotulos,
+        "limiar_eixos": eixos.LIMIAR,
         "vizinhos": vizinhos,
     }
 
@@ -155,6 +166,14 @@ aside h2 { font-size:13px; margin:0 0 8px; color:var(--suave); font-weight:600; 
 .ficha ul { margin:4px 0 12px; padding-left:18px; } .ficha li { margin:2px 0; }
 .vazio { color:var(--suave); }
 button.viz { font:inherit; color:var(--acento); background:none; border:0; padding:0; cursor:pointer; text-align:left; }
+details.leitura { margin:0 0 16px; padding-bottom:12px; border-bottom:1px solid var(--linha); }
+details.leitura summary { cursor:pointer; color:var(--acento); font-weight:600; margin-bottom:6px; }
+details.leitura p { margin:6px 0; color:var(--suave); font-size:13px; }
+.eixo-titulo { font-weight:600; margin:10px 0 4px; font-size:13px; }
+table.corr { border-collapse:collapse; width:100%; font-size:12px; font-variant-numeric:tabular-nums; }
+table.corr th, table.corr td { padding:2px 4px; text-align:right; border-bottom:1px solid var(--linha); }
+table.corr th:first-child, table.corr td:first-child { text-align:left; }
+table.corr td.forte { color:var(--tinta); font-weight:600; } table.corr td.fraca { color:var(--neutro); }
 @media (max-width: 860px) { .corpo { grid-template-columns:1fr; grid-template-rows:1fr auto; } aside { border-left:0; border-top:1px solid var(--linha); max-height:40vh; } }
 </style>
 <script>__PLOTLY__</script>
@@ -164,7 +183,9 @@ button.viz { font:inherit; color:var(--acento); background:none; border:0; paddi
   <header>
     <h1>Mapa da biblioteca</h1>
     <label>Vista <select id="vista">
-      <option value="2">UMAP 2D</option><option value="3">UMAP 3D</option><option value="va">Valência × excitação</option></select></label>
+      <option value="2">UMAP 2D</option><option value="3">UMAP 3D</option>
+      <option value="pca2">PCA 2D (interpretável)</option><option value="pca3">PCA 3D (interpretável)</option>
+      <option value="va">Valência × excitação</option></select></label>
     <label>Espaço <select id="espaco">
       <option value="effnet">EffNet (timbre/estilo)</option><option value="musicnn">MusiCNN</option><option value="interpretavel">Interpretável (features + gêneros)</option></select></label>
     <label>Cor <select id="cor">
@@ -178,7 +199,8 @@ button.viz { font:inherit; color:var(--acento); background:none; border:0; paddi
   </header>
   <div class="corpo">
     <div id="grafico"></div>
-    <aside><h2>Faixa</h2><div class="ficha" id="ficha"><p class="vazio">Clique num ponto (ou busque) para ver a faixa e as 8 mais parecidas.</p></div></aside>
+    <aside><details class="leitura" id="leitura"><summary>Como ler este mapa</summary><div id="leitura-corpo"></div></details>
+      <h2>Faixa</h2><div class="ficha" id="ficha"><p class="vazio">Clique num ponto (ou busque) para ver a faixa e as 8 mais parecidas.</p></div></aside>
   </div>
 </div>
 <script type="application/json" id="dados">__DADOS__</script>
@@ -198,7 +220,7 @@ const QUADRANTES = ["Animado / feliz", "Tenso / agitado", "Triste / melancólico
 const $ = id => document.getElementById(id);
 // Sem WebGL (alguns navegadores headless, GPUs bloqueadas) o 2D cai para SVG e o 3D fica indisponível.
 const GL = (() => { try { return !!document.createElement("canvas").getContext("webgl"); } catch (e) { return false; } })();
-if (!GL) $("vista").querySelector('option[value="3"]').disabled = true;
+if (!GL) ["3", "pca3"].forEach(v => $("vista").querySelector(`option[value="${v}"]`).disabled = true);
 let selecionado = null;
 
 $("meta").textContent = `${F.length} de ${D.biblioteca} faixas analisadas · gerado em ${D.gerado_em}`;
@@ -214,7 +236,42 @@ function quadrante(f) { if (f.v == null || f.ar == null) return null; return f.a
 function posicao(i) {
   const vista = $("vista").value;
   if (vista === "va") { const f = F[i]; return f.v == null || f.ar == null ? null : [f.v, f.ar]; }
+  if (vista.startsWith("pca")) return D.coords.pca[vista.slice(3)][i];
   return D.coords[$("espaco").value][vista][i];
+}
+
+// Rótulo e correlações dos eixos da vista atual (calculados no Python, #57)
+function eixosAtuais() {
+  const vista = $("vista").value;
+  if (vista === "va") return [];
+  if (vista.startsWith("pca")) return D.eixos.pca[vista.slice(3)] || [];
+  return D.eixos[$("espaco").value][vista] || [];
+}
+function num(x) { return x.toFixed(2).replace(".", ",").replace("-", "−"); }
+
+function leitura() {
+  const vista = $("vista").value, ex = eixosAtuais();
+  let html;
+  if (vista === "va") {
+    html = "<p>Eixos reais: valência (negativa → positiva) e excitação (calma → agitada), estimadas pelos modelos de humor.</p>";
+  } else {
+    html = vista.startsWith("pca")
+      ? "<p>PCA do espaço interpretável: cada eixo é uma <b>combinação exata</b> das features, com os pesos abaixo. Proximidade = perfil de features parecido.</p>"
+      : `<p><b>Perto = parecido</b>: o UMAP preserva vizinhanças. Distâncias entre grupos afastados e a direção dos eixos não são medidas.</p>
+         <p>Os eixos foram girados para as direções principais da nuvem e orientados para crescer com a energia. O rótulo diz o que cada um <b>acompanha</b> nos dados (ρ de Spearman); abaixo de ${num(D.limiar_eixos)}, sem direção clara.</p>`;
+    ex.forEach((e, k) => {
+      html += `<div class="eixo-titulo">${esc(e.rotulo)}</div>`;
+      if (e.pesos) html += "<p>pesos: " + e.pesos.map(([n, p]) => `${esc(n)} ${num(p)}`).join(" · ") + "</p>";
+    });
+    if (ex.length) {
+      const nomes = ex[0].correlacoes.map(c => c[0]);
+      const rho = ex.map(e => Object.fromEntries(e.correlacoes));
+      nomes.sort((a, b) => Math.max(...rho.map(r => Math.abs(r[b]))) - Math.max(...rho.map(r => Math.abs(r[a]))) || a.localeCompare(b));
+      html += `<table class="corr"><tr><th>ρ com</th>${ex.map((_, k) => `<th>eixo ${k + 1}</th>`).join("")}</tr>` +
+        nomes.map(n => `<tr><td>${esc(n)}</td>${rho.map(r => `<td class="${Math.abs(r[n]) >= D.limiar_eixos ? "forte" : "fraca"}">${num(r[n])}</td>`).join("")}</tr>`).join("") + "</table>";
+    } else html += '<p class="vazio">Sem projeção (faixas analisadas de menos).</p>';
+  }
+  $("leitura-corpo").innerHTML = html;
 }
 
 function grupos() {
@@ -259,8 +316,9 @@ function traco(idx, extra) {
 }
 
 function desenhar() {
-  const vista = $("vista").value, tres = vista === "3";
-  $("espaco").disabled = vista === "va";
+  const vista = $("vista").value, tres = vista === "3" || vista === "pca3";
+  $("espaco").disabled = vista === "va" || vista.startsWith("pca");
+  const rot = eixosAtuais().map(e => e.rotulo);
   $("rotulo-pl").style.display = $("cor").value === "playlist" ? "" : "none";
   const g = grupos();
   let tracos;
@@ -306,21 +364,24 @@ function desenhar() {
   const eixo = {showgrid: vista === "va", zeroline: false, showticklabels: vista === "va", gridcolor: css("--linha"),
     linecolor: css("--linha"), color: css("--suave")};
   const layout = {
-    paper_bgcolor: css("--bg"), plot_bgcolor: css("--bg"), font: {color: css("--tinta")}, margin: {l: 40, r: 10, t: 40, b: 40},  // t: espaço para a barra de ferramentas não cobrir a legenda
+    paper_bgcolor: css("--bg"), plot_bgcolor: css("--bg"), font: {color: css("--tinta")}, margin: {l: 50, r: 10, t: 40, b: 50},  // t: espaço para a barra de ferramentas não cobrir a legenda
     legend: {itemsizing: "constant", bgcolor: "rgba(0,0,0,0)"}, uirevision: vista + $("espaco").value, hovermode: "closest",
     hoverlabel: {bgcolor: css("--painel"), bordercolor: css("--linha-forte"), font: {color: css("--tinta")}},
     modebar: {bgcolor: "rgba(0,0,0,0)", color: css("--neutro"), activecolor: css("--acento")},
-    xaxis: {...eixo, title: vista === "va" ? {text: "valência →"} : undefined, range: vista === "va" ? [0, 1] : undefined},
-    yaxis: {...eixo, title: vista === "va" ? {text: "excitação →"} : undefined, range: vista === "va" ? [0, 1] : undefined},
+    xaxis: {...eixo, title: {text: vista === "va" ? "valência →" : rot[0] || "", font: {size: 12}}, range: vista === "va" ? [0, 1] : undefined},
+    yaxis: {...eixo, title: {text: vista === "va" ? "excitação →" : rot[1] || "", font: {size: 12}}, range: vista === "va" ? [0, 1] : undefined},
   };
-  const eixo3 = {...eixo, title: {text: ""}, showbackground: false, zerolinecolor: css("--linha"), spikecolor: css("--acento")};
-  if (tres) layout.scene = {xaxis: eixo3, yaxis: eixo3, zaxis: eixo3, bgcolor: css("--bg")};
+  // no 3D o título vai curto (sem "eixo N:" nem o ρ); o completo fica no painel "Como ler"
+  const curto = k => (rot[k] || "").replace(/^(eixo|PC)\s?\d+[^:]*:\s*/, `${"xyz"[k]}: `).replace(/\s*\(ρ [^)]*\)$/, "");
+  const eixo3 = k => ({...eixo, title: {text: curto(k), font: {size: 11}}, showbackground: false, zerolinecolor: css("--linha"), spikecolor: css("--acento")});
+  if (tres) layout.scene = {xaxis: eixo3(0), yaxis: eixo3(1), zaxis: eixo3(2), bgcolor: css("--bg")};
   if (vista === "va") {
     layout.shapes = [{type: "line", x0: .5, x1: .5, y0: 0, y1: 1, line: {color: css("--linha"), width: 1}}, {type: "line", x0: 0, x1: 1, y0: .5, y1: .5, line: {color: css("--linha"), width: 1}}];
     layout.annotations = [[.98, .98, "Animado / feliz", "right"], [.02, .98, "Tenso / agitado", "left"], [.02, .02, "Triste / melancólico", "left"], [.98, .02, "Calmo / sereno", "right"]]
       .map(([x, y, text, xanchor]) => ({x, y, text, xanchor, yanchor: y > .5 ? "top" : "bottom", showarrow: false, font: {color: css("--suave"), size: 12}}));
   }
   Plotly.react("grafico", tracos, layout, {responsive: true, displaylogo: false});
+  leitura();
 }
 
 function ficha(i) {

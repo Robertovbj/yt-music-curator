@@ -31,6 +31,10 @@ def test_dados_do_visualizador(con):
     assert next(x for x in d["faixas"] if x["id"] == "rap05")["na"] is True
     assert len(d["coords"]["effnet"]["2"]) == 36 and len(d["coords"]["effnet"]["3"][0]) == 3
     assert d["coords"]["musicnn"]["2"] == [None] * 36  # a biblioteca de teste não tem MusiCNN
+    assert [len(d["eixos"]["effnet"][k]) for k in ("2", "3")] == [2, 3] and d["eixos"]["musicnn"]["2"] == []
+    assert d["eixos"]["effnet"]["2"][0]["rotulo"].startswith("eixo 1:")
+    assert len(d["coords"]["pca"]["2"]) == 36 and None not in d["coords"]["pca"]["3"]
+    assert d["eixos"]["pca"]["2"][0]["pesos"] and d["eixos"]["pca"]["2"][0]["variancia"] > 0
     viz = d["vizinhos"][0]
     assert len(viz) == html.K_VIZINHOS and 0 not in viz
 
