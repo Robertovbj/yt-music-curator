@@ -117,6 +117,11 @@ def _imprimir(con, res, como_json: bool) -> None:
         )
     if res.descartes:
         typer.echo("fora: " + ", ".join(f"{k}: {v}" for k, v in sorted(res.descartes.items())), err=True)
+    ant, novas = rc.novidades(con, res.recomendacao_id)
+    if ant is not None:
+        typer.echo(
+            f"em relação à recomendação #{ant} (mesmas sementes): {len(novas)} faixa(s) que não estavam lá"
+        )
 
 
 def _plano(con, rid: int, criar: bool, nome: str | None, em: str | None, permitir: bool) -> None:
@@ -212,6 +217,65 @@ def lento_cmd(
 
 
 # ------------------------------------------------------------------ histórico
+
+
+@historico_app.command("listar")
+def listar(limite: int = typer.Option(20, "--limite", "-n"), como_json: bool = O_JSON) -> None:
+    """Recomendações feitas, das mais recentes: quantas novas viraram curtida, dislike ou ficaram sem reação
+    (o status vem da última `curator sincronizar`)."""
+    recs = rc.listar(banco(), limite)
+    if como_json:
+        typer.echo(json.dumps(recs, ensure_ascii=False, indent=2))
+        return
+    for r in recs:
+        s = r["status_itens"]
+        typer.echo(
+            f"#{r['recomendacao_id']:<4} {r['criada_em'][:16]} {r['modo']:<6} {r['escopo']:<8} {r['status']:<18} "
+            f"♥ {s['curtida']} · playlist {s['em_playlist']} · dislike {s['dislike']} · sem reação {s['sem_reacao']}"
+            f"  {r['pedido'] or ''}"
+        )
+
+
+@historico_app.command("mostrar")
+def mostrar(rid: int, como_json: bool = O_JSON) -> None:
+    """Itens de uma recomendação com o status atual de cada um."""
+    con = banco()
+    r = rc.obter(con, rid)
+    if r is None:
+        falhar(f"recomendação #{rid} não existe")
+    itens = rc.itens(con, rid)
+    if como_json:
+        typer.echo(json.dumps({**r, "itens": itens}, ensure_ascii=False, indent=2))
+        return
+    typer.echo(
+        f"recomendação #{rid} · {r['modo']} · {r['escopo']} · {r['status']} · {r['criada_em']}  {r['pedido'] or ''}"
+    )
+    simbolo = {"curtida": "♥", "dislike": "✗", "em_playlist": "+", "sem_reacao": "·"}
+    for i in itens:
+        origem = "biblioteca" if i["conhecida"] else ", ".join(i["fontes"])
+        typer.echo(
+            f"  {simbolo[i['status']]} {i['posicao']:>3}. {i['titulo']} — {', '.join(i['artistas'][:2])}  [{origem}]"
+        )
+
+
+@historico_app.command("acerto")
+def acerto(como_json: bool = O_JSON) -> None:
+    """Taxa de acerto das músicas novas por fonte e por modo (curtida ou posta numa playlist sua)."""
+    a = rc.acerto(banco())
+    if como_json:
+        typer.echo(json.dumps(a, ensure_ascii=False, indent=2))
+        return
+    if not a["fonte"]:
+        typer.echo("nenhuma recomendação ainda")
+        return
+    for grupo in ("fonte", "modo"):
+        typer.echo(f"por {grupo}:")
+        for k, c in sorted(a[grupo].items()):
+            typer.echo(
+                f"  {k:<11} {c['recomendadas']:>5} recomendadas · acerto {c['taxa_acerto']:.0%} "
+                f"(♥ {c['curtida']}, playlist {c['em_playlist']}) · dislike {c['taxa_dislike']:.0%}"
+            )
+    typer.echo("os pesos das fontes ficam em [recomendacoes.pesos_fontes] no config.toml")
 
 
 @historico_app.command("concluir")

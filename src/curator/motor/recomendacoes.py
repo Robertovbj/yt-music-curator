@@ -189,3 +189,52 @@ def listar(con: sqlite3.Connection, limite: int = 30) -> list[dict]:
         d["status_itens"] = contagem
         out.append(d)
     return out
+
+
+def anterior_com_mesmas_sementes(con: sqlite3.Connection, rid: int) -> int | None:
+    """A recomendação pronta mais recente, antes de `rid`, com o mesmo conjunto de sementes."""
+    atual = obter(con, rid)
+    if atual is None:
+        return None
+    alvo = sorted(atual["sementes"])
+    for r in con.execute(
+        "SELECT recomendacao_id, sementes FROM recomendacoes WHERE recomendacao_id < ? AND status = 'pronta' "
+        "ORDER BY recomendacao_id DESC",
+        (rid,),
+    ):
+        if sorted(json.loads(r["sementes"])) == alvo:
+            return r["recomendacao_id"]
+    return None
+
+
+def novidades(con: sqlite3.Connection, rid: int) -> tuple[int | None, list[str]]:
+    """(id da anterior com as mesmas sementes, faixas desta que não estavam nela)."""
+    ant = anterior_com_mesmas_sementes(con, rid)
+    if ant is None:
+        return None, []
+    antes = {i["video_id"] for i in itens(con, ant)}
+    return ant, [i["video_id"] for i in itens(con, rid) if i["video_id"] not in antes]
+
+
+def acerto(con: sqlite3.Connection) -> dict[str, dict[str, dict]]:
+    """Taxa de acerto das músicas novas recomendadas, por fonte e por modo: quantas viraram curtida (ou foram
+    para uma playlist própria) e quantas levaram dislike. Uma faixa conta uma vez por recomendação."""
+    out: dict[str, dict[str, dict]] = {"fonte": {}, "modo": {}}
+    for r in con.execute(
+        f"""SELECT i.fontes, r.modo, {STATUS_SQL} AS status FROM recomendacao_itens i
+            JOIN recomendacoes r USING (recomendacao_id) JOIN faixas f USING (video_id)
+            WHERE r.status = 'pronta' AND i.conhecida = 0"""
+    ):
+        for grupo, chaves in (("fonte", json.loads(r["fontes"])), ("modo", [r["modo"]])):
+            for k in chaves:
+                c = out[grupo].setdefault(
+                    k, {"recomendadas": 0, "curtida": 0, "em_playlist": 0, "dislike": 0}
+                )
+                c["recomendadas"] += 1
+                if r["status"] != "sem_reacao":
+                    c[r["status"]] += 1
+    for grupo in out.values():
+        for c in grupo.values():
+            c["taxa_acerto"] = round((c["curtida"] + c["em_playlist"]) / c["recomendadas"], 3)
+            c["taxa_dislike"] = round(c["dislike"] / c["recomendadas"], 3)
+    return out
