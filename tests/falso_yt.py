@@ -3,8 +3,9 @@
 from collections import Counter
 
 
-def faixa(vid, titulo=None, artistas=("Banda",), album=None, dur=200, set_id=None):
+def faixa(vid, titulo=None, artistas=("Banda",), album=None, dur=200, set_id=None, like=None):
     return {
+        "likeStatus": like,
         "videoId": vid,
         "title": titulo or f"Música {vid}",
         "artists": [{"name": a, "id": f"UC_{a.lower()}"} for a in artistas],
@@ -31,7 +32,10 @@ class FalsoYT:
 
     def get_liked_songs(self, limit=100):
         self.chamadas["get_liked_songs"] += 1
-        return {"trackCount": len(self.curtidas), "tracks": list(self.curtidas)}
+        return {
+            "trackCount": len(self.curtidas),
+            "tracks": [{**t, "likeStatus": "LIKE"} for t in self.curtidas],
+        }
 
     def get_library_playlists(self, limit=25):
         self.chamadas["get_library_playlists"] += 1

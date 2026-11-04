@@ -32,9 +32,30 @@ class Resumo:
 
 # ------------------------------------------------------------------ faixas
 
+# likeStatus do ytmusicapi → avaliação. Só o `get_playlist` (e as curtidas, que são uma playlist) lê o botão
+# de like de verdade; no `get_watch_playlist` (rádio) "INDIFFERENT" pode ser um dislike, então de lá só o LIKE
+# é confiável (ver a docstring do ytmusicapi). Nada que venha do rádio desfaz um dislike.
+AVALIACAO = {"LIKE": "like", "DISLIKE": "dislike", "INDIFFERENT": "neutra"}
 
-def gravar_faixa(con: sqlite3.Connection, t: dict) -> str | None:
-    """Insere ou atualiza uma faixa do ytmusicapi; devolve o video_id (None se indisponível)."""
+
+def registrar_avaliacao(
+    con: sqlite3.Connection, video_id: str, like_status: str | None, confiavel: bool = True
+) -> bool:
+    """Grava a avaliação vista no YT; devolve True se mudou. Com `confiavel=False`, só aceita LIKE."""
+    nova = AVALIACAO.get(like_status or "")
+    if nova is None or (not confiavel and nova != "like"):
+        return False
+    cur = con.execute(
+        "UPDATE faixas SET avaliacao = ?, avaliacao_em = ? WHERE video_id = ? AND avaliacao != ?",
+        (nova, agora(), video_id, nova),
+    )
+    return cur.rowcount == 1
+
+
+def gravar_faixa(con: sqlite3.Connection, t: dict, avaliacao_confiavel: bool = True) -> str | None:
+    """Insere ou atualiza uma faixa do ytmusicapi; devolve o video_id (None se indisponível).
+
+    `avaliacao_confiavel=False` para respostas do rádio (ver AVALIACAO)."""
     video_id = t.get("videoId")
     if not video_id:
         return None
@@ -83,6 +104,7 @@ def gravar_faixa(con: sqlite3.Connection, t: dict) -> str | None:
             "INSERT OR IGNORE INTO faixa_artistas (video_id, artista_id, ordem) VALUES (?, ?, ?)",
             (video_id, a["id"], ordem),
         )
+    registrar_avaliacao(con, video_id, t.get("likeStatus"), avaliacao_confiavel)
     return video_id
 
 
@@ -103,6 +125,15 @@ def sincronizar_curtidas(con: sqlite3.Connection, cli: ClienteYT) -> Resumo:
         con.executemany(
             "UPDATE faixas SET curtida = 1, posicao_curtida = ? WHERE video_id = ?",
             [(i, vid) for i, vid in enumerate(agora_ids, start=1)],
+        )
+        # descurtida: deixa de ser "like" (se virou dislike, a playlist em que ela estiver diz)
+        con.execute(
+            "UPDATE faixas SET avaliacao = 'neutra', avaliacao_em = ? WHERE avaliacao = 'like' AND curtida = 0",
+            (agora(),),
+        )
+        con.execute(
+            "UPDATE faixas SET avaliacao = 'like', avaliacao_em = ? WHERE curtida = 1 AND avaliacao != 'like'",
+            (agora(),),
         )
     novos = set(agora_ids)
     r.conta("total", len(novos))
