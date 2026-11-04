@@ -132,8 +132,9 @@ MODELO = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mapa da biblioteca</title>
 <style>
-:root { --bg:#f4f5f8; --painel:#ffffff; --tinta:#161a2b; --suave:#5d6478; --linha:#dcdfe7; --acento:#3346c8; }
-@media (prefers-color-scheme: dark) { :root { --bg:#0f1220; --painel:#171b2d; --tinta:#e6e8f1; --suave:#9aa1b8; --linha:#2a3049; --acento:#8593ff; } }
+/* Catppuccin Mocha (catppuccin.com/palette), sempre escuro */
+:root { color-scheme:dark; --bg:#1e1e2e; --painel:#181825; --tinta:#cdd6f4; --suave:#a6adc8;
+        --linha:#313244; --linha-forte:#45475a; --neutro:#6c7086; --acento:#cba6f7; }
 * { box-sizing:border-box; }
 html, body { margin:0; height:100%; background:var(--bg); color:var(--tinta); font:14px/1.45 system-ui, "Segoe UI", sans-serif; }
 .app { display:grid; grid-template-rows:auto 1fr; height:100%; }
@@ -184,8 +185,15 @@ button.viz { font:inherit; color:var(--acento); background:none; border:0; paddi
 <script>
 const D = JSON.parse(document.getElementById("dados").textContent);
 const F = D.faixas;
-const PALETA = ["#3346c8","#e4572e","#17a398","#f0a202","#8e44ad","#2e86de","#c0392b","#27ae60","#d35400","#7f8c8d","#b8336a","#0f9d58","#6c5ce7","#e17055","#00b894","#fd79a8"];
-const CINZA = "#9aa1b8";
+// Acentos do Catppuccin Mocha, em ordem que alterna os matizes vizinhos
+const M = {blue: "#89b4fa", peach: "#fab387", green: "#a6e3a1", mauve: "#cba6f7", red: "#f38ba8", teal: "#94e2d5", yellow: "#f9e2af",
+  pink: "#f5c2e7", sapphire: "#74c7ec", maroon: "#eba0ac", lavender: "#b4befe", sky: "#89dceb", flamingo: "#f2cdcd", rosewater: "#f5e0dc"};
+const PALETA = Object.values(M);
+const CINZA = "#6c7086";  // overlay0
+// Mais categorias que cores: a cor se repete com outro símbolo (o 3D aceita menos símbolos)
+const SIMBOLOS = {2: ["circle", "diamond", "square", "triangle-up"], 3: ["circle", "diamond", "square", "cross"]};
+// Escala contínua só com acentos, com a claridade (OKLab) sempre crescente: blue → mauve → peach → yellow
+const ESCALA = [[0, M.blue], [.35, M.mauve], [.7, M.peach], [1, M.yellow]];
 const QUADRANTES = ["Animado / feliz", "Tenso / agitado", "Triste / melancólico", "Calmo / sereno"];
 const $ = id => document.getElementById(id);
 // Sem WebGL (alguns navegadores headless, GPUs bloqueadas) o 2D cai para SVG e o 3D fica indisponível.
@@ -200,6 +208,7 @@ if (!D.clusters.length) $("cor").value = "genero";
 
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function css(nome) { return getComputedStyle(document.documentElement).getPropertyValue(nome).trim(); }
+function categoria(k) { return {cor: PALETA[k % PALETA.length], simbolo: Math.floor(k / PALETA.length)}; }
 function quadrante(f) { if (f.v == null || f.ar == null) return null; return f.ar >= .5 ? (f.v >= .5 ? 0 : 1) : (f.v >= .5 ? 3 : 2); }
 
 function posicao(i) {
@@ -213,22 +222,22 @@ function grupos() {
   const cor = $("cor").value, todos = F.map((_, i) => i);
   if (cor === "bpm" || cor === "energia") return {continuo: cor === "bpm" ? "bpm" : "en", titulo: cor === "bpm" ? "BPM" : "Energia"};
   if (cor === "cluster") {
-    const g = D.clusters.map((nome, c) => ({nome, cor: PALETA[c % PALETA.length], idx: []}));
+    const g = D.clusters.map((nome, c) => ({nome, ...categoria(c), idx: []}));
     const sem = {nome: "sem cluster", cor: CINZA, idx: []};
     todos.forEach(i => (F[i].c.length ? g[F[i].c[0]].idx : sem.idx).push(i));
     return [...g, sem];
   }
-  if (cor === "genero") return D.generos.map((nome, k) => ({nome, cor: k === D.generos.length - 1 ? CINZA : PALETA[k], idx: todos.filter(i => F[i].g === k)}));
+  if (cor === "genero") return D.generos.map((nome, k) => ({nome, ...(k === D.generos.length - 1 ? {cor: CINZA} : categoria(k)), idx: todos.filter(i => F[i].g === k)}));
   if (cor === "quadrante") {
-    const g = QUADRANTES.map((nome, k) => ({nome, cor: ["#f0a202","#e4572e","#2e86de","#17a398"][k], idx: []}));
+    const g = QUADRANTES.map((nome, k) => ({nome, cor: [M.yellow, M.red, M.blue, M.teal][k], idx: []}));
     const sem = {nome: "sem valência", cor: CINZA, idx: []};
     todos.forEach(i => { const q = quadrante(F[i]); (q == null ? sem.idx : g[q].idx).push(i); });
     return [...g, sem];
   }
-  if (cor === "na") return [{nome: "não alocada", cor: "#e4572e", idx: todos.filter(i => F[i].na)}, {nome: "em alguma playlist", cor: CINZA, idx: todos.filter(i => !F[i].na)}];
+  if (cor === "na") return [{nome: "não alocada", cor: M.red, idx: todos.filter(i => F[i].na)}, {nome: "em alguma playlist", cor: CINZA, idx: todos.filter(i => !F[i].na)}];
   const p = $("playlist").value;
   if (p === "multi") {
-    const nomes = ["nenhuma", "1 playlist", "2 playlists", "3 ou mais"], cores = [CINZA, "#2e86de", "#f0a202", "#e4572e"];
+    const nomes = ["nenhuma", "1 playlist", "2 playlists", "3 ou mais"], cores = [CINZA, M.blue, M.peach, M.red];
     return nomes.map((nome, k) => ({nome, cor: cores[k], idx: todos.filter(i => Math.min(F[i].pl.length, 3) === k)}));
   }
   const pi = +p;
@@ -258,10 +267,18 @@ function desenhar() {
   if (g.continuo) {
     const t = traco(F.map((_, i) => i).filter(i => F[i][g.continuo] != null), {name: g.titulo});
     t.marker.color = t.customdata.map(i => F[i][g.continuo]);
-    t.marker.colorscale = "Viridis"; t.marker.showscale = true; t.marker.colorbar = {title: {text: g.titulo}, thickness: 12};
+    t.marker.colorscale = ESCALA; t.marker.showscale = true;
+    // ancorada embaixo, deixa o topo livre para a legenda (vizinhos, selecionada, centroides)
+    t.marker.colorbar = {title: {text: g.titulo}, thickness: 12, len: .7, y: 0, yanchor: "bottom", outlinewidth: 0, tickcolor: css("--linha-forte")};
     tracos = [t];
   } else {
-    tracos = g.filter(x => x.idx.length).map(x => { const t = traco(x.idx, {name: `${x.nome} (${x.idx.length})`}); t.marker.color = x.cor; return t; });
+    const simbolos = SIMBOLOS[tres ? 3 : 2];
+    tracos = g.filter(x => x.idx.length).map(x => {
+      const t = traco(x.idx, {name: `${x.nome} (${x.idx.length})`});
+      t.marker.color = x.cor;
+      if (x.simbolo) t.marker.symbol = simbolos[x.simbolo % simbolos.length];
+      return t;
+    });
   }
   if ($("centroides").checked) {
     const cx = [], cy = [], cz = [], nomes = [];
@@ -286,14 +303,18 @@ function desenhar() {
     if (tres) { linhas.z = lz; alvo.z = [p0[2]]; }
     tracos.push(linhas, alvo);
   }
-  const eixo = {showgrid: vista === "va", zeroline: false, showticklabels: vista === "va", gridcolor: css("--linha"), color: css("--suave")};
+  const eixo = {showgrid: vista === "va", zeroline: false, showticklabels: vista === "va", gridcolor: css("--linha"),
+    linecolor: css("--linha"), color: css("--suave")};
   const layout = {
-    paper_bgcolor: css("--bg"), plot_bgcolor: css("--bg"), font: {color: css("--tinta")}, margin: {l: 40, r: 10, t: 10, b: 40},
+    paper_bgcolor: css("--bg"), plot_bgcolor: css("--bg"), font: {color: css("--tinta")}, margin: {l: 40, r: 10, t: 40, b: 40},  // t: espaço para a barra de ferramentas não cobrir a legenda
     legend: {itemsizing: "constant", bgcolor: "rgba(0,0,0,0)"}, uirevision: vista + $("espaco").value, hovermode: "closest",
+    hoverlabel: {bgcolor: css("--painel"), bordercolor: css("--linha-forte"), font: {color: css("--tinta")}},
+    modebar: {bgcolor: "rgba(0,0,0,0)", color: css("--neutro"), activecolor: css("--acento")},
     xaxis: {...eixo, title: vista === "va" ? {text: "valência →"} : undefined, range: vista === "va" ? [0, 1] : undefined},
     yaxis: {...eixo, title: vista === "va" ? {text: "excitação →"} : undefined, range: vista === "va" ? [0, 1] : undefined},
   };
-  if (tres) layout.scene = {xaxis: {...eixo, title: {text: ""}}, yaxis: {...eixo, title: {text: ""}}, zaxis: {...eixo, title: {text: ""}}, bgcolor: css("--bg")};
+  const eixo3 = {...eixo, title: {text: ""}, showbackground: false, zerolinecolor: css("--linha"), spikecolor: css("--acento")};
+  if (tres) layout.scene = {xaxis: eixo3, yaxis: eixo3, zaxis: eixo3, bgcolor: css("--bg")};
   if (vista === "va") {
     layout.shapes = [{type: "line", x0: .5, x1: .5, y0: 0, y1: 1, line: {color: css("--linha"), width: 1}}, {type: "line", x0: 0, x1: 1, y0: .5, y1: .5, line: {color: css("--linha"), width: 1}}];
     layout.annotations = [[.98, .98, "Animado / feliz", "right"], [.02, .98, "Tenso / agitado", "left"], [.02, .02, "Triste / melancólico", "left"], [.98, .02, "Calmo / sereno", "right"]]
@@ -323,7 +344,6 @@ $("busca").addEventListener("change", e => {
 $("ficha").addEventListener("click", e => { const b = e.target.closest("button.viz"); if (b) selecionar(+b.dataset.i); });
 desenhar();
 $("grafico").on("plotly_click", ev => { const p = ev.points.find(p => p.customdata != null); if (p) selecionar(p.customdata); });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", desenhar);
 </script>
 </body>
 </html>
