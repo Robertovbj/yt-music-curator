@@ -25,6 +25,7 @@ class Candidato:
     duracao_s: float | None = None
     score: float = 0.0
     exato: bool = False  # o próprio video_id da curtida: não precisa conferir duração
+    local: str | None = None  # áudio que já está no disco (provedor `guardado`, #84)
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class Saida:
 class Arquivo:
     caminho: Path
     bytes: int
-    temporario: bool = True  # False para a pasta local: o worker nunca apaga
+    temporario: bool = True  # False para a pasta local e os guardados: o worker nunca apaga nem guarda
     parcial: bool = False  # só o começo da faixa (faixas longas): a duração do arquivo não é a da faixa
 
 

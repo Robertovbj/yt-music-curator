@@ -131,6 +131,9 @@ def estatisticas(con: sqlite3.Connection) -> dict:
         "nao_alocadas": len(nao_alocadas(con)),
         "dislikes": um("SELECT count(*) FROM faixas WHERE avaliacao = 'dislike'"),
         "dislikes_em_playlists": sum(len(v) for v in dislikes_em_playlists(con).values()),
+        "com_estatisticas": um(
+            f"SELECT count(*) FROM faixas WHERE estatisticas_em IS NOT NULL AND video_id IN {bib}"
+        ),
         "analisadas_fora_da_biblioteca": um(
             f"SELECT count(*) FROM analises WHERE status = 'ok' AND video_id NOT IN {bib}"
         ),

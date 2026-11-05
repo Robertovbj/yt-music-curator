@@ -1,5 +1,8 @@
 """Worker da fila: escolhe saída → busca no provedor → baixa → analisa → grava → apaga o áudio (ADR-08).
 
+Com `[audio] guardar` (#84, experimental), o áudio analisado é guardado em vez de apagado, e o provedor
+`guardado` o reaproveita quando a faixa volta à fila.
+
 Decisões por tipo de erro:
 - ErroBloqueio: a SAÍDA vai para quarentena; a faixa volta a pendente sem gastar tentativa.
 - ErroIndisponivel / áudio inválido / nenhum candidato confiável: tenta o próximo provedor.
@@ -25,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from curator.audio import fila, proxies
+from curator.audio import fila, guardados, proxies
 from curator.audio.analisador import VERSAO_ANALISADOR, AudioInvalido
 from curator.audio.persistir import Origem, gravar_analise, gravar_falha
 from curator.audio.provedores.base import (
@@ -147,6 +150,8 @@ class Worker:
         self.limiar = cfg["provedores"]["limiar_casamento"]
         self.tolerancia = cfg["provedores"]["tolerancia_duracao_s"]
         self.max_tentativas = cfg["fila"]["max_tentativas"]
+        self.guardar = cfg["audio"]["guardar"]
+        self.pasta_guardados = guardados.pasta(cfg)
 
     @property
     def parar(self) -> bool:
@@ -349,20 +354,23 @@ class Worker:
                 raise
             except Exception as e:
                 raise ErroAnalise(f"análise falhou: {e}") from e
-            # o diretório temporário (e o áudio) somem ao sair do `with`, mesmo com exceção
-        # um download parcial não tem a duração da faixa; o casamento já conferiu a duração do candidato
-        if (
-            not melhor.exato
-            and not arquivo.parcial
-            and faixa.duracao_s
-            and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia
-        ):
-            raise ErroIndisponivel(
-                f"duração baixada {r.duracao_s:.0f}s ≠ esperada {faixa.duracao_s}s; candidato descartado"
-            )
+            # um download parcial não tem a duração da faixa; o casamento já conferiu a duração do candidato
+            if (
+                not melhor.exato
+                and not arquivo.parcial
+                and faixa.duracao_s
+                and abs(r.duracao_s - faixa.duracao_s) > 3 * self.tolerancia
+            ):
+                raise ErroIndisponivel(
+                    f"duração baixada {r.duracao_s:.0f}s ≠ esperada {faixa.duracao_s}s; candidato descartado"
+                )
+            if self.guardar and arquivo.temporario:
+                guardados.guardar(self.con, self.pasta_guardados, faixa.video_id, arquivo, melhor)
+            # o diretório temporário (e o áudio, se não foi guardado) somem ao sair do `with`, mesmo com exceção
+        # a fonte é a do candidato: um áudio guardado (#84) mantém o provedor do download original
         gravar_analise(
             self.con, faixa.video_id, r,
-            Origem(nome, melhor.ref, melhor.score, arquivo.bytes or None),
+            Origem(melhor.provedor, melhor.ref, melhor.score, arquivo.bytes or None),
             VERSAO_ANALISADOR, self.analisador.hash_modelos, round(time.perf_counter() - inicio, 2),
         )  # fmt: skip
         return "ok"

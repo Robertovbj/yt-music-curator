@@ -20,9 +20,17 @@ def sincronizar(
     forcar: bool = typer.Option(False, "--forcar", help="Ignora caches e rebaixa tudo."),
     sem_metadados: bool = typer.Option(False, "--sem-metadados", help="Pula a busca de dados de álbum."),
     sem_fila: bool = typer.Option(False, "--sem-fila", help="Não põe faixas novas na fila de análise."),
+    sem_estatisticas: bool = typer.Option(
+        False, "--sem-estatisticas", help="Pula visualizações e data de publicação (uma chamada por faixa)."
+    ),
 ) -> None:
-    """Curtidas, playlists próprias, pertencimento e metadados de álbum."""
-    from curator.coleta.sincronizar import completar_metadados, sincronizar_curtidas, sincronizar_playlists
+    """Curtidas, playlists próprias, pertencimento, metadados de álbum e estatísticas das faixas."""
+    from curator.coleta.sincronizar import (
+        completar_estatisticas,
+        completar_metadados,
+        sincronizar_curtidas,
+        sincronizar_playlists,
+    )
 
     cfg = carregar_config()
     con, cli = banco(), cliente()
@@ -41,6 +49,14 @@ def sincronizar(
     if not sem_metadados:
         imprimir_resumo(
             "álbuns", completar_metadados(con, cli, ttl_dias=cfg["metadados"]["ttl_dias"], forcar=forcar)
+        )
+    if not sem_estatisticas:
+        meta = cfg["metadados"]
+        imprimir_resumo(
+            "estatísticas das faixas",
+            completar_estatisticas(
+                con, cli, meta["estatisticas_por_rodada"], meta["estatisticas_ttl_dias"], forcar=forcar
+            ),
         )
     if not sem_fila:
         from curator.interfaces.comandos.analise import enfileirar

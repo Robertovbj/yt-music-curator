@@ -3,8 +3,21 @@
 from collections import Counter
 
 
-def faixa(vid, titulo=None, artistas=("Banda",), album=None, dur=200, set_id=None, like=None):
-    return {
+def faixa(
+    vid,
+    titulo=None,
+    artistas=("Banda",),
+    album=None,
+    dur=200,
+    set_id=None,
+    like=None,
+    explicita=None,
+    tipo=None,
+):
+    extra = {"isExplicit": explicita} if explicita is not None else {}
+    if tipo:
+        extra["videoType"] = f"MUSIC_VIDEO_TYPE_{tipo}"
+    return extra | {
         "likeStatus": like,
         "videoId": vid,
         "title": titulo or f"Música {vid}",
@@ -22,6 +35,8 @@ class FalsoYT:
         self.playlists: dict[str, dict] = {}  # id -> {"title", "tracks", "owned"}
         self.albuns: dict[str, dict] = {}
         self.falhar_album: set[str] = set()
+        self.musicas: dict[str, dict] = {}  # video_id → resposta do get_song (padrão: visualizações e data)
+        self.falhar_musica: set[str] = set()
         self.falhar_escrita: set[str] = set()
         self.radios: dict[str, list[dict]] = {}  # semente → faixas do rádio (sem a própria semente)
         self.relacionadas: dict[str, list[dict]] = {}
@@ -137,6 +152,15 @@ class FalsoYT:
         self.chamadas["delete_playlist"] += 1
         del self.playlists[playlistId]
         return "STATUS_SUCCEEDED"
+
+    def get_song(self, videoId, signatureTimestamp=None):
+        self.chamadas["get_song"] += 1
+        if videoId in self.falhar_musica:
+            raise Exception("HTTP 500")
+        return self.musicas.get(videoId) or {
+            "videoDetails": {"videoId": videoId, "viewCount": "1234567"},
+            "microformat": {"microformatDataRenderer": {"publishDate": "2020-08-06T03:01:47-07:00"}},
+        }
 
     def get_album(self, browseId):
         self.chamadas["get_album"] += 1

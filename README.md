@@ -49,6 +49,8 @@ Uma playlist ignorada some das listagens, do mapa, das receitas, da classificaç
 
 A sincronização é total: uma música removida de uma playlist no YouTube Music some do banco. Uma playlist com a mesma contagem, sincronizada há menos de 24 h, não é baixada de novo (`--forcar` ignora esses caches).
 
+O `sincronizar` também guarda, de cada faixa, se é explícita e o tipo do vídeo (faixa de áudio, clipe ou vídeo de usuário), e busca as visualizações no YouTube e a data de publicação. Essas duas pedem uma chamada por faixa, então saem 300 por sincronização (`[metadados] estatisticas_por_rodada`; `--sem-estatisticas` pula). A API não informa quantas vezes você ouviu cada música.
+
 ### Análise de áudio
 
 Requer o extra `analise`, além de `ffmpeg`/`ffprobe` e `deno` no sistema (o yt-dlp usa o Deno para resolver o desafio JavaScript do YouTube).
@@ -77,6 +79,20 @@ caminho = "~/Música"   # depois: uv run curator pasta-local
 ```
 
 Para rodar todo dia em segundo plano, veja `contrib/systemd/`.
+
+**Guardar os áudios (experimental).** Por padrão o áudio é apagado depois da análise. Enquanto o projeto muda (um modelo novo reabre a fila inteira), dá para guardá-los e reanalisar sem baixar de novo: a faixa com áudio guardado é analisada sem rede, sem cota e sem pausa. Na média são 1,6 MB por faixa.
+
+```toml
+[audio]
+guardar = true
+guardar_dir = ""   # vazio = ~/.local/share/yt-music-curator/audios
+```
+
+```sh
+uv run curator analisar --guardar-audio   # liga só nesta execução
+uv run curator audios status              # quantos e quanto espaço
+uv run curator audios limpar              # apaga todos (as análises ficam)
+```
 
 **Várias saídas em paralelo.** Cada `[[proxy]]` do config vira uma linha de download própria, com a sua cota e o seu ritmo; a análise continua uma faixa por vez. `contrib/saidas/compose.yml` traz duas saídas prontas: uma VPN OpenVPN e um celular via Tailscale (exit node, nos dados móveis), cada uma como SOCKS5 em `127.0.0.1`:
 

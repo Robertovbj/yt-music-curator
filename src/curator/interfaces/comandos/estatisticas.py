@@ -29,6 +29,10 @@ def estatisticas(como_json: bool = typer.Option(False, "--json", help="Saída em
         )
     if est["analisadas_fora_da_biblioteca"]:
         typer.echo(f"analisadas fora da biblioteca (guardadas): {est['analisadas_fora_da_biblioteca']}")
+    typer.echo(
+        f"visualizações e data de publicação (#85): {est['com_estatisticas']} de {est['biblioteca']} faixas "
+        "(o `sincronizar` busca um lote por vez)"
+    )
     typer.echo("análise: " + (", ".join(f"{k}: {v}" for k, v in sorted(est["analise"].items())) or "—"))
     for p in est["playlists"]:
         agreg = " [agregadora]" if p["tipo"] == "agregadora" else ""
