@@ -61,8 +61,8 @@ def executar_e_registrar(con: sqlite3.Connection, nome: str) -> tuple[Execucao, 
     ex = executar(con, r)
     rid = con.execute("SELECT receita_id FROM receitas WHERE nome = ?", (nome,)).fetchone()[0]
     cur = con.execute(
-        "INSERT INTO execucoes (receita_id, versao_banco, resultado, executada_em) VALUES (?, ?, ?, ?)",
-        (rid, ex.versao_banco, json.dumps(ex.ids), agora()),
+        "INSERT INTO execucoes (receita_id, versao_banco, versao_motor, resultado, executada_em) VALUES (?, ?, ?, ?, ?)",
+        (rid, ex.versao_banco, ex.versao_motor, json.dumps(ex.ids), agora()),
     )
     return ex, cur.lastrowid
 
@@ -90,7 +90,7 @@ def execucoes(con: sqlite3.Connection, nome: str) -> list[dict]:
     return [
         {**dict(r), "resultado": json.loads(r["resultado"])}
         for r in con.execute(
-            """SELECT e.execucao_id, e.versao_banco, e.resultado, e.executada_em FROM execucoes e
+            """SELECT e.execucao_id, e.versao_banco, e.versao_motor, e.resultado, e.executada_em FROM execucoes e
                JOIN receitas r USING (receita_id) WHERE r.nome = ? ORDER BY e.execucao_id""",
             (nome,),
         )

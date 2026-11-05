@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from curator.banco import consultas, hierarquia
 from curator.interfaces.comum import banco
 from curator.motor import classificar as cl
-from curator.motor import espacos, planos, receitas
+from curator.motor import espacos, generos, planos, receitas
 from curator.motor.executor import executar
 from curator.motor.receita import ReceitaInvalida, carregar, resolver_playlist
 from curator.texto import normalizar
@@ -27,7 +27,7 @@ INSTRUCOES = """\
 Você organiza a biblioteca do YouTube Music do usuário. Fluxo para um pedido de playlist:
 1. obter_receita_por_pedido(pedido): se já existe receita para essa frase, reutilize (mesmo pedido → mesma playlist).
 2. Monte uma RECEITA (JSON). Use só nomes que existem: descrever_vocabulario (features, gêneros-pai, estilos,
-   humores), buscar_artistas / buscar_albuns (para exclusões exatas, ex.: "sem Hoyoverse" → buscar_artistas("hoyo")),
+   humores), examinar_genero (fronteira de um gênero-pai), buscar_artistas / buscar_albuns (para exclusões exatas, ex.: "sem Hoyoverse" → buscar_artistas("hoyo")),
    arvore_playlists. Veja exemplos_de_receitas para os 6 pedidos de referência.
 3. executar_receita(receita): o motor escolhe as músicas (determinístico). Se vier "erros", corrija com a sugestão.
    Se vierem POUCAS faixas, NÃO afrouxe filtros nem pesos por conta própria (isso faz o mesmo pedido dar playlists
@@ -54,7 +54,14 @@ e NUNCA sugira mexer numa delas sem ele nomear qual. Por isso:
   renomear_cluster(gerais=True) a partir das estatísticas, antes de criar_plano_das_gerais.
 - "reorganize a playlist X" → sugerir_reorganizacao(mae=X). Faixas ainda não analisadas ficam de fora de tudo
 (o worker analisa ~500 por dia); diga isso quando 'sem_analise' for grande.
-Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1; gêneros são probabilidades (0,3 já é forte no Discogs400).
+Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1. Estilos, humores e instrumentos são saídas dos
+modelos (0..1, cada uma isolada; um estilo raramente passa de 0,5). genero_pai_min é outra régua: a afinidade
+RELATIVA ao núcleo do gênero na biblioteca (1,0 = tão típica quanto a faixa mediana do núcleo; 0,7 amplo, 0,8
+normal, 1,0 estrito), igual para todos os gêneros. Antes de fixar o limite, chame examinar_genero(pai, limite) e
+olhe as faixas logo acima e logo abaixo do corte: use o que você sabe dos artistas para subir ou descer o limite
+(é a receita que guarda o número, então o resultado continua reprodutível). Pedido "só com vocal"/"sem lo-fi":
+filtros.max.instrumental 0,5. Pop e Electronic quase não se separam pelo áudio (estes modelos chamam a produção
+pop de Electronic): para eles prefira perfil_alvo, sementes e estilos específicos a genero_pai_min.
 """
 
 
@@ -174,7 +181,9 @@ def descrever_vocabulario(
     """Nomes válidos para a receita, com a distribuição na biblioteca analisada.
 
     features: p10/mediana/p90 de cada feature (para escolher alvos e limiares realistas).
-    generos_pai / estilos: quantas faixas têm aquele gênero como dominante (Discogs400).
+    generos_pai / estilos: quantas faixas têm aquele gênero como dominante (Discogs400). Em generos_pai, também
+      a régua do genero_pai_min: `regua` (nucleo, nucleo_amplo ou global — global = poucas faixas desse gênero, limite
+      menos confiável) e quantas faixas passam em cada nível (amplo 0,7, normal 0,8, estrito 1,0).
     humores / instrumentos / generos_jamendo: probabilidade média (Jamendo).
     `filtro` restringe por trecho do nome.
     """
@@ -202,6 +211,14 @@ def descrever_vocabulario(
         itens = [
             {"nome": n, "faixas_dominante": contagem.get(n, 0)} for n in todos if not f or f in normalizar(n)
         ]
+        if grupo == "generos_pai" and itens:
+            afin = generos.Afinidades(con)
+            base = espacos.da_biblioteca(con)
+            for it in itens:
+                rel = afin.relativa(it["nome"], base)
+                reg = afin.reguas[it["nome"]]
+                it["regua"] = {"tipo": reg.tipo, "faixas_no_nucleo": reg.nucleo}
+                it["faixas_por_nivel"] = {n: int((rel >= t).sum()) for n, t in generos.NIVEIS.items()}
         itens.sort(key=lambda x: (-x["faixas_dominante"], x["nome"]))
         return {"grupo": grupo, "faixas_analisadas": len(d.ids), "itens": itens[:limite]}
     tipo = {"humores": "jamendo_mood", "instrumentos": "jamendo_instr", "generos_jamendo": "jamendo_genre"}[
@@ -216,6 +233,52 @@ def descrever_vocabulario(
     ]
     itens.sort(key=lambda x: (-x["prob_media"], x["nome"]))
     return {"grupo": grupo, "faixas_analisadas": len(m.ids), "itens": itens[:limite]}
+
+
+def examinar_genero(
+    pai: str, limite: float = 0.8, n: int = 8, universo: Literal["biblioteca", "curtidas"] = "biblioteca"
+) -> dict:
+    """A fronteira de um gênero-pai antes de fixar genero_pai_min: quantas faixas passam em cada limite e as `n`
+    faixas logo acima e logo abaixo de `limite` (afinidade relativa, 1,0 = típica do núcleo do gênero).
+
+    Use o que você sabe dos artistas: se as de baixo são do gênero, desça o limite; se as de cima não são, suba.
+    `instrumental` alto (> 0,5) costuma ser lo-fi/trilha sem voz."""
+    con = banco()
+    afin = generos.Afinidades(con)
+    if pai not in afin.pais:
+        perto = [p for p in afin.pais if normalizar(pai) in normalizar(p)]
+        return {"erro": f"gênero-pai '{pai}' não existe" + (f" (quis dizer: {', '.join(perto)}?)" if perto else ""),
+                "generos_pai": afin.pais}  # fmt: skip
+    if universo == "curtidas":
+        analisadas, fora = set(espacos.analisadas(con)), consultas.bloqueadas(con)
+        ids = [
+            r[0]
+            for r in con.execute("SELECT video_id FROM faixas WHERE curtida = 1 ORDER BY video_id")
+            if r[0] in analisadas and r[0] not in fora
+        ]
+    else:
+        ids = espacos.da_biblioteca(con)
+    rel = afin.relativa(pai, ids)
+    ordem = sorted(range(len(ids)), key=lambda i: (-rel[i], ids[i]))
+    corte = sum(1 for i in ordem if rel[i] >= limite)
+    esc = espacos.escalares(con)
+    j = esc.colunas.index("instrumental") if "instrumental" in esc.colunas else None
+    meta = _faixas(con, [ids[i] for i in ordem[max(0, corte - n) : corte + n]])
+
+    def item(i: int) -> dict:
+        x = esc.X[esc.indice[ids[i]], j] if j is not None and ids[i] in esc.indice else float("nan")
+        return {**meta[ids[i]], "afinidade": round(float(rel[i]), 3),
+                "instrumental": None if np.isnan(x) else round(float(x), 2)}  # fmt: skip
+
+    reg = afin.reguas[pai]
+    return {
+        "pai": pai,
+        "limite": limite,
+        "regua": {"tipo": reg.tipo, "faixas_no_nucleo": reg.nucleo},
+        "faixas_por_limite": {str(t): int((rel >= t).sum()) for t in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2)},
+        "acima": [item(i) for i in ordem[max(0, corte - n) : corte]],
+        "abaixo": [item(i) for i in ordem[corte : corte + n]],
+    }
 
 
 def exemplos_de_receitas() -> list[dict]:
@@ -622,7 +685,7 @@ def faltantes_nas_agregadoras() -> dict:
 
 
 FERRAMENTAS = [
-    arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario,
+    arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario, examinar_genero,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
     sugerir_playlists_gerais, criar_plano_das_gerais, sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
     criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,

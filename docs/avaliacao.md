@@ -79,3 +79,50 @@ Dois motivos, ambos visíveis nos dados:
 - **Playlists grandes e variadas ficam com limiar baixo** (Genshin OST tem 451 faixas), porque τ é o percentil 10 dos próprios membros. Elas aceitam quase qualquer faixa.
 
 Com essa regra, `curator classificar` sugere playlists demais para cada faixa não alocada nas raízes. Isso pede outra calibração (limiar mais alto, escolha entre as raízes ou deixar de fora as playlists por franquia), registrada na #75. O teste não diz qual: a precisão também cai quando a faixa cabe de verdade numa playlist em que não está.
+
+## Gênero-pai (#83)
+
+**Data:** 2026-11-05 · **Faixas analisadas:** 3.322 · **Decisão:** ADR-14 · **Script:** `contrib/avaliacao/genero_pai.py` (o gabarito é pessoal e fica fora do repositório).
+
+**Gabarito, sem nenhuma playlist do usuário:**
+- **Por artista:** artistas de gênero consistente, rotulados pela IA e revisados pelo usuário. São 40 faixas de Hip Hop, 140 de Rock, 176 de Pop e 32 de Electronic.
+- **Faixa a faixa, rap:** 43 rap e 21 não rap, os casos difíceis da sessão em que o problema apareceu ("Without Me", Tauz e NF contra Heat Waves, Stressed Out, Alec Benjamin).
+- **Ressalva:** o gabarito por artista favorece qualquer sinal que use o artista ou vizinhos do mesmo artista (Flexer, 2007). Por isso, esses sinais foram julgados só no gabarito faixa a faixa e com intervalo de confiança.
+
+**AUC** (chance de uma faixa do gênero ficar acima de uma de fora; IC 95% por bootstrap no gabarito faixa a faixa):
+
+| Sinal | Rap faixa a faixa | Hip Hop | Rock | Pop | Electronic |
+|---|---|---|---|---|---|
+| Maior estilo (antigo) | 0,788 [0,670; 0,897] | 0,977 | 0,984 | 0,752 | 0,892 |
+| Fração do Discogs | 0,931 [0,862; 0,983] | 0,995 | 0,992 | 0,803 | 0,891 |
+| Afinidade (fração Discogs + Jamendo, o motor) | 0,946 [0,884; 0,989] | 0,997 | 0,996 | 0,848 | 0,866 |
+
+- **Fração contra máximo:** +0,14 (IC +0,06 a +0,23), a mudança que de fato resolve. Na ordem nova, "Without Me" é a 19ª de Hip Hop na biblioteca.
+- **Jamendo:** +0,014 (IC 0,000 a +0,037). Com o mesmo embedding, as frações concordam muito (ρ de 0,66 a 0,95).
+- **Concordância entre os dois modelos, sem gabarito** (ρ de Spearman entre o sinal do Discogs e o do Jamendo, na biblioteca toda): a fração foi a melhor ou empatou nos 12 pais com equivalente no Jamendo. Electronic subiu de 0,58 (máximo) para 0,79.
+
+**Régua relativa** (revocação / falsos positivos em cada nível):
+
+| Gabarito | ≥ 0,7 (amplo) | ≥ 0,8 (normal) | ≥ 1,0 (estrito) |
+|---|---|---|---|
+| Rap faixa a faixa | 0,91 / 0,33 | 0,91 / 0,14 | 0,84 / 0,05 |
+| Hip Hop por artista | 0,90 / 0,01 | 0,82 / 0,00 | 0,78 / 0,00 |
+| Rock por artista | 0,90 / 0,02 | 0,84 / 0,01 | 0,51 / 0,00 |
+| Pop por artista | 0,37 / 0,10 | 0,21 / 0,04 | 0,05 / 0,01 |
+| Electronic por artista | 0,75 / 0,19 | 0,59 / 0,12 | 0,41 / 0,05 |
+
+- O mesmo nível funciona para Hip Hop e Rock. O exemplo "Rap" usa 0,8; o "Rock geral" usa 0,7.
+- Pop e Electronic não têm um bom corte em nenhum nível.
+- Os falsos positivos do rap no 0,8 são Heat Waves (duas versões) e Stressed Out. Nenhum sinal de áudio os tira; `examinar_genero` mostra a fronteira para a IA decidir.
+
+**Testados e deixados de fora** (detalhes no ADR-14):
+
+| Variante | Rap faixa a faixa | Por quê ficou fora |
+|---|---|---|
+| + 15 vizinhos no EffNet | 0,945 | não acrescenta nada (as cabeças já são desse embedding) |
+| + 15 vizinhos no MusiCNN (peso 0,3) | 0,958 [0,909; 0,992] | ganho de +0,012 com IC de −0,003 a +0,037; 24% dos vizinhos são do mesmo artista |
+| + puxão de 25% para a média do artista | 0,970 | ganho vindo do gabarito por artista; na HOYO-MiX tirou 6 das 11 faixas de Rock |
+| Noisy-OR dos estilos | 0,93 | infla os pais com muitos estilos (985 faixas de Electronic e 65 de Hip Hop no mesmo limite) |
+
+Vizinhos no MusiCNN: k de 5 a 30 e peso de 0,3 a 0,7 deram AUC entre 0,93 e 0,97 no rap. O resultado é estável, e nenhuma configuração sai do ruído.
+

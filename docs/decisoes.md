@@ -549,6 +549,40 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 
 **Custos e ritmo:** tudo é leitura no YT pela mesma conta da sincronização (ytmusicapi, com a pausa do cliente); uma chamada de rádio serve ao rádio e às relacionadas. As candidatas não geram buscas de metadados de álbum (só os álbuns da biblioteca são completados). Downloads só no modo lento, depois da biblioteca.
 
+## ADR-14: Afinidade de gênero-pai (#83)
+
+**Problema:** o gênero-pai de uma receita (`genero_pai_min`) era o **maior estilo** do Discogs400 daquele pai. Num pedido de rap, "Without Me" (Eminem) ficou de fora com `{"Hip Hop": 0.3}`: o maior estilo dela é 0,18 (Gangsta), mas a soma dos estilos de Hip Hop dá 1,31. Além disso, o mesmo número valia coisas diferentes em cada gênero, e as instruções do MCP diziam à IA que "0,3 já é forte".
+
+**Decisão**
+1. **Fração do Discogs400:** soma dos estilos do pai ÷ soma dos 400 estilos, ou seja, quanto da "atenção" do modelo cai naquele pai.
+   - As saídas do modelo são sigmoides independentes (o JSON do modelo declara `Sigmoid`; ROC-AUC 0,954 e PR-AUC 0,206 no Discogs-4M). Elas ordenam bem, mas o valor absoluto de um estilo não é uma probabilidade calibrada.
+   - Os rótulos do Discogs são por lançamento e descem para as faixas (Bogdanov et al., 2019): estilos irmãos aparecem juntos, e o modelo aprende a dividir a massa entre eles.
+   - Em classificação hierárquica multirrótulo, a saída coerente de um pai é pelo menos a maior das filhas (o MCM de Giunchiglia & Lukasiewicz, 2020). O máximo é, portanto, um **limite inferior**, e subestima justamente os pais cujos estilos dividem a massa. O noisy-OR, `1 − ∏(1 − p)`, supõe estilos independentes e cresce com o número de estilos do pai: com o mesmo 0,6 passam 985 faixas de Electronic (106 estilos) e 65 de Hip Hop (26). A fração não depende do tamanho do pai nem da escala geral das saídas.
+2. **Fusão com o MTG-Jamendo:** média da fração do Discogs com a fração dos rótulos equivalentes do Jamendo (tabela fixa `MAPA_JAMENDO`, sem os rótulos de década). Ressalva: as duas cabeças usam o mesmo embedding EffNet, e as frações concordam muito (ρ de 0,66 a 0,95 por gênero). Ensembles só ganham com diversidade entre os membros (Kuncheva & Whitaker, 2003), e aqui ela é baixa: no rap, a fusão soma +0,014 de AUC (IC 95% de 0,000 a 0,037), e em Electronic piora (0,891 → 0,866). Fica porque não custa nada e ajuda nos outros gêneros.
+3. **Régua relativa por gênero:** a afinidade é dividida pela mediana da afinidade no **núcleo** do pai, as faixas da biblioteca que todas as cabeças põem nesse pai em 1º lugar. 1,0 = tão típica quanto a faixa mediana do núcleo; os níveis são amplo 0,7, normal 0,8 e estrito 1,0.
+   - É o limite por categoria da literatura de classificação multirrótulo (Yang, 2001), necessário porque cada gênero tem a sua escala.
+   - Sem gabarito, o núcleo faz o papel de rótulos fracos: faixas em que duas visões concordam, como no co-training (Blum & Mitchell, 1998). A ressalva é a mesma do item 2: as visões não são independentes.
+   - Núcleo com menos de 10 faixas: núcleo amplo (1º lugar em qualquer cabeça). Sem isso, a referência global (mediana das medianas dos núcleos). Na biblioteca atual, Blues, Latin, Funk/Soul e Reggae ficam na global, e `descrever_vocabulario` avisa.
+4. **A fronteira é conferida pela IA:** `examinar_genero(pai, limite)` mostra quantas faixas passam em cada nível e as faixas logo acima e logo abaixo do corte. Gênero é ambíguo também para pessoas (Lippens et al., 2004), e um sistema pode acertar uma métrica sem saber o que é o gênero (Sturm, 2014). A fronteira rap/pop não está no som: Heat Waves e Stressed Out passam do corte, e Houdini fica abaixo dele. A IA usa o que sabe dos artistas para ajustar o limite, e a receita guarda o número (ADR-05).
+5. **Versão do motor:** `VERSAO_MOTOR = "2"` fica gravada em cada execução de receita (migração 016). Mesma receita + mesmo banco + mesma versão = mesma lista.
+
+**Testado e rejeitado** (medições em `docs/avaliacao.md`)
+- **Suavizar pelos vizinhos no embedding**, como na propagação de rótulos por similaridade de conteúdo (Sordo et al., 2007):
+  - no EffNet não acrescenta nada, porque as cabeças já saem desse embedding;
+  - no MusiCNN, +0,012 de AUC, com IC de −0,003 a +0,037;
+  - de 24% a 28% dos 15 vizinhos são do mesmo artista. O próprio Sordo et al. mostra essa dependência: com filtro de artista, a precisão cai de 0,56 para 0,41.
+  - Ganho dentro do ruído, custo N × N e o score de uma faixa passaria a depender das outras: fica fora.
+- **Puxar para a média do artista:**
+  - o ganho medido (rap 0,946 → 0,970) vem do gabarito, que dá o mesmo rótulo a todas as faixas do artista. É o efeito do artista na avaliação de gênero (Pampalk et al., 2005; Flexer, 2007);
+  - na HOYO-MiX (848 faixas, de vários gêneros), ele tirou 6 das 11 faixas de Rock acima do corte;
+  - com um peso por bayes empírico, que só puxa artistas coerentes, o efeito praticamente some. Fica fora.
+- **Noisy-OR:** ver item 1.
+
+**Limites conhecidos:**
+- Pop e Electronic quase não se separam pelo áudio (AUC 0,85 e 0,87): estes modelos chamam a produção pop moderna de Electronic. Para eles, as instruções recomendam perfil-alvo, sementes e estilos específicos.
+- Rap com cara de pop fica abaixo do corte (Houdini 0,57; Can't Hold Us 0,55).
+- Os caminhos para melhorar estão na #88: modelos de outra rede e outro treino (YAMNet, que tem a classe "Rapping"; tags do MSD-MusiCNN; MAEST) e metadados de gênero.
+
 ---
 
 ## Fluxos dos pedidos de exemplo
@@ -556,8 +590,8 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 | Pedido | Fluxo |
 |---|---|
 | "Quero uma playlist para dirigir, músicas que me deem vontade de sair fazendo drift" | A IA consulta `descrever_vocabulario` e monta uma receita com `perfil_alvo` de energy, aggressive e arousal altos, BPM 120–160 e danceability média/alta, e `generos_preferidos` com os estilos eletrônicos e agressivos existentes (como industrial, phonk e drum & bass, se estiverem no vocabulário). Pode usar como `sementes` 3–5 faixas que você citar. → `executar_receita` → você ajusta → `salvar_receita` → plano. |
-| "Quero uma playlist de rap" | Receita com filtro duro: gênero-pai **Hip Hop** com probabilidade ≥ limiar (Discogs400 ou Jamendo genre), sem perfil-alvo, ordenada pela probabilidade do gênero e com diversidade por artista. |
-| "Quero uma playlist de rock geral, e uma playlist com meus subgêneros centrais de rock" | (1) Receita com o gênero-pai **Rock** ≥ limiar. (2) Dentro desse universo, o motor soma a massa dos estilos `Rock---*`, escolhe os estilos que concentram a maior parte da sua biblioteca, ou roda `sugerir_reorganizacao` restrito a esse universo, e gera uma playlist por subgênero central. Uma faixa pode entrar em várias. Se a árvore já tiver "Rock - All" e filhas, o plano propõe ajustes nela em vez de duplicar. |
+| "Quero uma playlist de rap" | Receita com filtro duro: gênero-pai **Hip Hop** ≥ 0,8 na régua relativa (ADR-14), conferida antes com `examinar_genero`, e `max.instrumental` 0,5 para tirar o lo-fi instrumental. Sem perfil-alvo, ordenada pela afinidade do gênero e com diversidade por artista. |
+| "Quero uma playlist de rock geral, e uma playlist com meus subgêneros centrais de rock" | (1) Receita com o gênero-pai **Rock** ≥ 0,7 (nível amplo, ADR-14). (2) Dentro desse universo, o motor soma a massa dos estilos `Rock---*`, escolhe os estilos que concentram a maior parte da sua biblioteca, ou roda `sugerir_reorganizacao` restrito a esse universo, e gera uma playlist por subgênero central. Uma faixa pode entrar em várias. Se a árvore já tiver "Rock - All" e filhas, o plano propõe ajustes nela em vez de duplicar. |
 | "Veja todas minhas músicas curtidas que ainda não estão em uma playlist, e me diga onde colocar" | `classificar_nao_alocadas` (ADR-06): multi-rótulo hierárquico. As faixas "sem destino" vêm agrupadas como possíveis playlists novas. → plano. |
 | "Veja todas as minhas músicas. Sugira playlists para eu poder organizar melhor" | `sugerir_reorganizacao` (ADR-07): clusters sobrepostos, nomes dados pela IA a partir das estatísticas, sugestões de fusão e divisão comparando com a árvore atual. → plano. |
 | "Quero uma playlist de pop MISTURANDO minhas curtidas e músicas que não conheço" | Pedido explícito de misturar: `recomendar_misturando_curtidas` com a playlist de pop como semente (ADR-13). Se o modo (rápido/lento) não foi dito, a IA pergunta antes. |
@@ -581,7 +615,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 
 ## Riscos e questões em aberto
 
-- **Viés dos modelos:** os modelos de gênero do Essentia têm viés para o catálogo ocidental. J-Rock, kawaii metal e OSTs de jogos podem receber rótulos estranhos. Mitigações: o embedding e o kNN dependem menos dos rótulos; considerar enriquecer com tags do Last.fm (API gratuita) num ADR futuro.
+- **Viés dos modelos:** os modelos de gênero do Essentia têm viés para o catálogo ocidental. J-Rock, kawaii metal e OSTs de jogos podem receber rótulos estranhos. Mitigações: o embedding e o kNN dependem menos dos rótulos; a régua do gênero-pai é relativa à própria biblioteca (ADR-14); modelos de outra rede (YAMNet, tags do MSD-MusiCNN) e metadados de gênero estão na #88.
 - **Mudanças no YouTube:** o yt-dlp pode quebrar ou passar a exigir PO token, e a fila precisa aguentar parar por dias.
 - **Tamanho da biblioteca:** medido em 3417 faixas (218 h). O brute-force em numpy sobra (ADR-02); a cota define os ~18 dias da carga inicial (ADR-08.5).
 - **Custo do Essentia na CPU:** medido em ~5–6 s por faixa de 3 min e ~2,1 GB de RAM. Não é o gargalo (a cota é), então paralelismo e GPU ficam fora por enquanto.
@@ -601,3 +635,13 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - McInnes, L., Healy, J., & Melville, J. (2018). *UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction*. arXiv:1802.03426.
 - Campello, R. J. G. B., Moulavi, D., & Sander, J. (2013). *Density-Based Clustering Based on Hierarchical Density Estimates*. PAKDD 2013.
 - Atil, B., et al. (2024). *Non-Determinism of "Deterministic" LLM Settings*. arXiv:2408.04667.
+- Bogdanov, D., Porter, A., Schreiber, H., Urbano, J., & Oramas, S. (2019). *The AcousticBrainz Genre Dataset: Multi-Source, Multi-Level, Multi-Label, and Large-Scale*. ISMIR 2019, pp. 360–367.
+- Giunchiglia, E., & Lukasiewicz, T. (2020). *Coherent Hierarchical Multi-Label Classification Networks*. NeurIPS 2020. arXiv:2010.10151.
+- Yang, Y. (2001). *A study of thresholding strategies for text categorization*. SIGIR 2001, pp. 137–145. doi:10.1145/383952.383975.
+- Blum, A., & Mitchell, T. (1998). *Combining labeled and unlabeled data with co-training*. COLT 1998.
+- Kuncheva, L. I., & Whitaker, C. J. (2003). *Measures of diversity in classifier ensembles and their relationship with the ensemble accuracy*. Machine Learning, 51(2), 181–207.
+- Sordo, M., Laurier, C., & Celma, Ò. (2007). *Annotating Music Collections: How Content-Based Similarity Helps to Propagate Labels*. ISMIR 2007, pp. 531–534.
+- Pampalk, E., Flexer, A., & Widmer, G. (2005). *Improvements of audio-based music similarity and genre classification*. ISMIR 2005.
+- Flexer, A. (2007). *A closer look on artist filters for musical genre classification*. ISMIR 2007.
+- Lippens, S., Martens, J.-P., & De Mulder, T. (2004). *A comparison of human and automatic musical genre classification*. ICASSP 2004.
+- Sturm, B. L. (2014). *A simple method to determine if a music information retrieval system is a "horse"*. IEEE Transactions on Multimedia, 16(6), 1636–1644. doi:10.1109/TMM.2014.2330697.

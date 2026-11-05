@@ -7,6 +7,9 @@
 4. ordenação total por (-score, video_id)
 5. MMR (Carbonell & Goldstein, 1998) com λ fixo + limite por artista
 6. corte no tamanho
+
+`VERSAO_MOTOR` muda quando o significado de um campo da receita muda; a execução guarda a versão (ADR-05).
+v2 (#83): `genero_pai_min` passou a ser a afinidade relativa ao núcleo do gênero (ADR-14), não o maior estilo.
 """
 
 import json
@@ -18,9 +21,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from curator.banco import consultas
-from curator.motor import espacos
+from curator.motor import espacos, generos
 from curator.motor.receita import Receita, resolver_playlist, validar
 from curator.texto import normalizar
+
+VERSAO_MOTOR = "2"
 
 
 @dataclass
@@ -39,6 +44,7 @@ class Execucao:
     sem_analise: int
     apos_filtros: int
     descartes: Counter = field(default_factory=Counter)
+    versao_motor: str = VERSAO_MOTOR
 
     @property
     def ids(self) -> list[str]:
@@ -99,12 +105,13 @@ def _indice_rotulos(con: sqlite3.Connection) -> dict[str, list[tuple[str, int]]]
 
 
 class _Probs:
-    """Probabilidade de um rótulo por faixa (máximo entre os modelos que têm o rótulo)."""
+    """Probabilidade de um rótulo por faixa (máximo entre os modelos que têm o rótulo) e afinidade de gênero-pai."""
 
     def __init__(self, con, ids: list[str]):
         self.con, self.ids = con, ids
         self.indice = _indice_rotulos(con)
         self.matrizes = {t: espacos.probabilidades(con, t) for t in espacos.TIPOS_PROBABILIDADE}
+        self._afinidades: generos.Afinidades | None = None
 
     def de(self, rotulo: str) -> np.ndarray:
         out = np.zeros(len(self.ids), np.float32)
@@ -115,10 +122,10 @@ class _Probs:
         return out
 
     def do_pai(self, pai: str) -> np.ndarray:
-        estilos = [r for r in self.indice if r.startswith(pai + "---")]
-        return (
-            np.max([self.de(r) for r in estilos], axis=0) if estilos else np.zeros(len(self.ids), np.float32)
-        )
+        """Afinidade relativa (#83): 1,0 = tão típica do gênero quanto a faixa mediana do núcleo dele."""
+        if self._afinidades is None:
+            self._afinidades = generos.Afinidades(self.con)
+        return self._afinidades.relativa(pai, self.ids).astype(np.float32)
 
 
 def _menciona(texto_norm: str, nome_norm: str) -> bool:
@@ -288,6 +295,10 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
         if E is not None:
             sim_max = np.maximum(sim_max, (E @ E[pegar] + 1) / 2)
 
+    if (
+        restantes and len(escolhidos) < r.tamanho
+    ):  # sobrou espaço: o que ficou de fora foi pelo limite por artista
+        ex.descartes["limite por artista"] = len(restantes)
     ex.itens = [
         Item(ids[i], round(float(score[i]), 6), {k: round(float(v[i]), 6) for k, v in comps.items()})
         for i in escolhidos

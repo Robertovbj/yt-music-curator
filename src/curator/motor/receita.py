@@ -36,7 +36,8 @@ class Filtros(BaseModel):
     min: dict[str, float] = {}
     max: dict[str, float] = {}
     generos_min: dict[str, Unidade] = {}  # passa se QUALQUER rótulo listado tiver prob ≥ valor
-    genero_pai_min: dict[str, Unidade] = {}  # "Rock": maior prob entre os estilos "Rock---*"
+    # afinidade RELATIVA ao núcleo do gênero (#83, ADR-14): 1,0 = típica; 0,7 amplo, 0,8 normal, 1,0 estrito
+    genero_pai_min: dict[str, Annotated[float, Field(ge=0, le=3)]] = {}
 
 
 class Diversidade(BaseModel):
