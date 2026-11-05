@@ -17,6 +17,9 @@ PADRAO: dict = {
     "metadados": {
         "ttl_dias": 30,
         "intervalo_s": 0.7,  # pausa entre chamadas ao ytmusicapi
+        # visualizações e data de publicação (#85): uma chamada por faixa, então poucas por sincronização
+        "estatisticas_por_rodada": 300,
+        "estatisticas_ttl_dias": 30,
     },
     "planos": {
         "limite_faixas": 200,  # acima disso, `plano aplicar` exige --grande além da confirmação

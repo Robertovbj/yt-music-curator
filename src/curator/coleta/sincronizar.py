@@ -105,6 +105,8 @@ def gravar_faixa(con: sqlite3.Connection, t: dict, avaliacao_confiavel: bool = T
     ]
     album = t.get("album") or {}
     album_id = album.get("id")
+    explicita = None if t.get("isExplicit") is None else int(bool(t["isExplicit"]))
+    tipo_video = (t.get("videoType") or "").removeprefix("MUSIC_VIDEO_TYPE_") or None  # ATV, OMV, UGC…
     momento = agora()
     if album_id:
         con.execute(
@@ -112,14 +114,17 @@ def gravar_faixa(con: sqlite3.Connection, t: dict, avaliacao_confiavel: bool = T
             (album_id, album.get("name")),
         )
     con.execute(
-        """INSERT INTO faixas (video_id, titulo, artistas, album_id, album_nome, duracao_s, criada_em, atualizada_em)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """INSERT INTO faixas (video_id, titulo, artistas, album_id, album_nome, duracao_s, explicita, tipo_video,
+                              criada_em, atualizada_em)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (video_id) DO UPDATE SET
              titulo = excluded.titulo,
              artistas = excluded.artistas,
              album_id = coalesce(excluded.album_id, faixas.album_id),
              album_nome = coalesce(excluded.album_nome, faixas.album_nome),
              duracao_s = coalesce(excluded.duracao_s, faixas.duracao_s),
+             explicita = coalesce(excluded.explicita, faixas.explicita),
+             tipo_video = coalesce(excluded.tipo_video, faixas.tipo_video),
              atualizada_em = excluded.atualizada_em""",
         (
             video_id,
@@ -128,6 +133,8 @@ def gravar_faixa(con: sqlite3.Connection, t: dict, avaliacao_confiavel: bool = T
             album_id,
             album.get("name"),
             t.get("duration_seconds"),
+            explicita,
+            tipo_video,
             momento,
             momento,
         ),
@@ -359,4 +366,53 @@ def completar_metadados(
             (album.get("title"), ano, album.get("description"), agora(), a["album_id"]),
         )
         r.conta("buscados")
+    return r
+
+
+# ------------------------------------------------------------------ estatísticas (#85)
+
+
+def completar_estatisticas(
+    con: sqlite3.Connection, cli: ClienteYT, por_rodada: int = 300, ttl_dias: float = 30, forcar: bool = False
+) -> Resumo:
+    """Visualizações (globais) e data de publicação de cada faixa da biblioteca, pelo `get_song`.
+
+    Uma chamada por faixa: no máximo `por_rodada` por sincronização, das que nunca foram buscadas ou venceram
+    (`forcar` ignora a validade, não o limite). A API não tem contagem de reproduções por usuário. Falha agenda
+    nova tentativa e nunca conta como cache."""
+    r = Resumo()
+    momento = datetime.now(UTC)
+    agora_s = momento.strftime("%Y-%m-%dT%H:%M:%SZ")
+    vencido = "9999" if forcar else (momento - timedelta(days=ttl_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pendentes = con.execute(
+        f"""SELECT video_id, titulo, estatisticas_tentativas FROM faixas
+            WHERE video_id IN ({BIBLIOTECA}) AND (estatisticas_em IS NULL OR estatisticas_em < :vencido)
+              AND (:forcar OR estatisticas_proxima IS NULL OR estatisticas_proxima <= :agora)
+            ORDER BY estatisticas_em IS NOT NULL, estatisticas_em, video_id""",
+        {"vencido": vencido, "agora": agora_s, "forcar": forcar},
+    ).fetchall()
+    for f in pendentes[:por_rodada]:
+        try:
+            song = cli.chamar("get_song", f["video_id"])
+        except Exception as e:
+            tentativas = f["estatisticas_tentativas"] + 1
+            proxima = momento + min(timedelta(hours=2**tentativas), timedelta(days=7))
+            con.execute(
+                "UPDATE faixas SET estatisticas_tentativas = ?, estatisticas_proxima = ? WHERE video_id = ?",
+                (tentativas, proxima.strftime("%Y-%m-%dT%H:%M:%SZ"), f["video_id"]),
+            )
+            r.conta("falhas")
+            log.warning("estatísticas de %s: %s (nova tentativa em %s)", f["titulo"], e, proxima)
+            continue
+        detalhes = song.get("videoDetails") or {}
+        micro = (song.get("microformat") or {}).get("microformatDataRenderer") or {}
+        publicada = (micro.get("publishDate") or micro.get("uploadDate") or "")[:10] or None
+        con.execute(
+            """UPDATE faixas SET visualizacoes = coalesce(?, visualizacoes), publicada_em = coalesce(?, publicada_em),
+                 estatisticas_em = ?, estatisticas_tentativas = 0, estatisticas_proxima = NULL WHERE video_id = ?""",
+            (_contagem(detalhes.get("viewCount")), publicada, agora(), f["video_id"]),
+        )
+        r.conta("buscadas" if detalhes else "sem_dados")
+    if len(pendentes) > por_rodada:
+        r.conta("faltam", len(pendentes) - por_rodada)
     return r

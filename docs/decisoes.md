@@ -150,6 +150,7 @@ src/curator/
 
 - **Pertencimento:** a sincronização de cada playlist é **total, dentro de uma transação**: apaga e reinsere `playlist_faixas`. Isso corrige o bug do helper, em que uma música removida continuava no cache. A playlist só é baixada de novo quando a contagem ou o `snapshot_hash` muda, ou com `--forcar`.
 - **Metadados** (álbum, artista): TTL de 30 dias, configurável.
+- **Uso e popularidade (#85, 2026-11-05):** a API não tem contagem de reproduções por usuário, e o histórico (`get_history`) só responde com o histórico do YouTube ligado na conta, desligado nesta (que é compartilhada). Ficam em `faixas` o que a API dá: `explicita` e `tipo_video` (faixa de áudio, clipe, vídeo de usuário), que vêm nas curtidas e playlists sem chamada extra, e `visualizacoes` (de todo o YouTube) e `publicada_em`, pelo `get_song`. Este é uma chamada por faixa, então o `sincronizar` busca no máximo `[metadados] estatisticas_por_rodada` (300) por vez, com validade de 30 dias e backoff na falha.
 - **Falha não é cache.** Uma chamada que falha não grava resultado vazio. O item vai para a fila com backoff (bug do helper).
 - **Análise:** é feita **uma vez por faixa**. Só é refeita quando `versao_analisador` ou `hash_modelos` mudam. O áudio não é guardado, a não ser no modo experimental da #84 (ver ADR-08.1).
 - **Vetores completos.** Todos os vetores de probabilidade (400, 87, 56, 40 dimensões) e os embeddings ficam salvos, para que filtros e receitas novas não precisem de reanálise.

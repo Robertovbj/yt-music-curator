@@ -49,6 +49,8 @@ Uma playlist ignorada some das listagens, do mapa, das receitas, da classificaç
 
 A sincronização é total: uma música removida de uma playlist no YouTube Music some do banco. Uma playlist com a mesma contagem, sincronizada há menos de 24 h, não é baixada de novo (`--forcar` ignora esses caches).
 
+O `sincronizar` também guarda, de cada faixa, se é explícita e o tipo do vídeo (faixa de áudio, clipe ou vídeo de usuário), e busca as visualizações no YouTube e a data de publicação. Essas duas pedem uma chamada por faixa, então saem 300 por sincronização (`[metadados] estatisticas_por_rodada`; `--sem-estatisticas` pula). A API não informa quantas vezes você ouviu cada música.
+
 ### Análise de áudio
 
 Requer o extra `analise`, além de `ffmpeg`/`ffprobe` e `deno` no sistema (o yt-dlp usa o Deno para resolver o desafio JavaScript do YouTube).
