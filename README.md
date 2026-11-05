@@ -128,6 +128,8 @@ uv run curator plano mostrar                            # o diff, agrupado por p
 
 Nomes de artistas, gêneros, features e playlists são conferidos com o banco; um nome errado é recusado com sugestão (`quis dizer: Banda Rock?`). Nada é aplicado no YouTube Music ainda: os planos ficam guardados para o M7.
 
+O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, igual para todos os gêneros. 1,0 é tão típico do gênero quanto a faixa mediana do núcleo dele na sua biblioteca, o conjunto de faixas que os dois modelos põem nesse gênero em primeiro lugar. Os níveis são 0,7 amplo, 0,8 normal e 1,0 estrito. Pelo MCP, `examinar_genero` mostra as faixas logo acima e logo abaixo do corte. Pop e Electronic quase não se separam pelo áudio. A decisão está no ADR-14, e a medição em `docs/avaliacao.md`.
+
 ## Desenvolvimento
 
 ```sh

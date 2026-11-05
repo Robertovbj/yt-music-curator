@@ -25,21 +25,21 @@
   },
   {
     "pedido": "Quero uma playlist de rap",
-    "fluxo": "Filtro duro pelo gênero-pai; o executor ordena pela própria probabilidade do gênero.",
+    "fluxo": "Filtro duro pelo gênero-pai na régua relativa (0,8 = normal); antes, examinar_genero('Hip Hop', 0.8) para conferir a fronteira. Rap é vocal: max.instrumental 0,5 tira o lo-fi instrumental. Sem limite por artista: o pedido é o rap da biblioteca, e um limite tiraria faixas que o usuário espera ver (use max_por_artista só se ele pedir variedade; 'limite por artista' nos descartes diz quantas saíram). O executor ordena pela afinidade do gênero.",
     "receita": {
       "nome": "Rap",
       "tamanho": 80,
-      "filtros": {"genero_pai_min": {"Hip Hop": 0.3}},
-      "diversidade": {"lambda": 0.85, "max_por_artista": 4}
+      "filtros": {"genero_pai_min": {"Hip Hop": 0.8}, "max": {"instrumental": 0.5}},
+      "diversidade": {"lambda": 0.85, "max_por_artista": null}
     }
   },
   {
     "pedido": "Quero uma playlist de rock geral, e uma playlist com meus subgêneros centrais de rock",
-    "fluxo": "Rock geral: receita pelo gênero-pai. Subgêneros centrais: sugerir_reorganizacao(mae='Rock - All') — os clusters dentro do rock são os subgêneros que a sua biblioteca realmente tem; renomear_cluster com nomes bons; se já houver filhas, o plano completa as existentes em vez de duplicar.",
+    "fluxo": "Rock geral: receita pelo gênero-pai, no nível amplo (0,7), porque é \"geral\". Subgêneros centrais: sugerir_reorganizacao(mae='Rock - All') — os clusters dentro do rock são os subgêneros que a sua biblioteca realmente tem; renomear_cluster com nomes bons; se já houver filhas, o plano completa as existentes em vez de duplicar.",
     "receita": {
       "nome": "Rock geral",
       "tamanho": 150,
-      "filtros": {"genero_pai_min": {"Rock": 0.3}},
+      "filtros": {"genero_pai_min": {"Rock": 0.7}},
       "diversidade": {"lambda": 0.9, "max_por_artista": 5}
     }
   },

@@ -39,6 +39,32 @@ def test_vocabulario(con):
     ]
 
 
+def test_vocabulario_mostra_a_regua_do_genero_pai(con):
+    pais = {x["nome"]: x for x in m.descrever_vocabulario("generos_pai")["itens"]}
+    hh = pais["Hip Hop"]
+    assert hh["regua"] == {"tipo": "nucleo", "faixas_no_nucleo": 14}
+    assert (
+        hh["faixas_por_nivel"]["amplo"]
+        >= hh["faixas_por_nivel"]["normal"]
+        >= hh["faixas_por_nivel"]["estrito"]
+    )
+    assert hh["faixas_por_nivel"]["normal"] == 14  # os 14 raps, e só eles
+
+
+def test_examinar_genero_mostra_a_fronteira(con):
+    r = m.examinar_genero("Hip Hop", 0.8, n=3)
+    assert r["regua"]["tipo"] == "nucleo" and r["faixas_por_limite"]["0.8"] == 14
+    assert len(r["acima"]) == 3 and all(
+        i["afinidade"] >= 0.8 and i["video_id"].startswith("rap") for i in r["acima"]
+    )
+    assert len(r["abaixo"]) == 3 and all(
+        i["afinidade"] < 0.8 and not i["video_id"].startswith("rap") for i in r["abaixo"]
+    )
+    assert m.examinar_genero("Hip Hop", 0.8, universo="curtidas")["faixas_por_limite"]["0.8"] == 14
+    erro = m.examinar_genero("hip")
+    assert "não existe" in erro["erro"] and "Hip Hop" in erro["erro"]
+
+
 def test_executar_receita_devolve_erros_para_a_ia_corrigir(con):
     r = m.executar_receita({"nome": "x", "filtros": {"excluir_artistas": ["Ambientisa"]}})
     assert "erros" in r and "quis dizer: Ambientista" in r["erros"][0]

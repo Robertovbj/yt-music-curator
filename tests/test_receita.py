@@ -77,13 +77,22 @@ def test_genero_pai_como_filtro_e_ordenacao(con):
     r = Receita(
         nome="rap",
         tamanho=50,
-        filtros={"genero_pai_min": {"Hip Hop": 0.3}},
-        diversidade={"max_por_artista": None},
+        filtros={"genero_pai_min": {"Hip Hop": 0.8}},  # régua relativa ao núcleo do gênero (#83)
+        diversidade={"max_por_artista": None, "lambda": 1},  # só relevância: a ordem é a da afinidade
     )
     e = executar(con, r)
     assert len(e.ids) == 12 and all(v.startswith("rap") for v in e.ids)
     assert e.descartes["gênero-pai abaixo do mínimo"] == 24
     assert [i.score for i in e.itens] == sorted((i.score for i in e.itens), reverse=True)
+
+
+def test_limite_por_artista_aparece_nos_descartes(con):
+    r = Receita(nome="rap", tamanho=50, filtros={"genero_pai_min": {"Hip Hop": 0.8}},
+                diversidade={"max_por_artista": 2})  # fmt: skip
+    e = executar(con, r)
+    assert len(e.ids) == 2 and e.descartes["limite por artista"] == 10  # 12 raps do mesmo artista
+    cheio = executar(con, r.model_copy(update={"tamanho": 2}))
+    assert "limite por artista" not in cheio.descartes  # cortou pelo tamanho, não pelo limite
 
 
 def test_exclusao_de_artista_nao_vaza_nem_por_feat(con):
