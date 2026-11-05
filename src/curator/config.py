@@ -40,6 +40,9 @@ PADRAO: dict = {
         # menor bitrate aceitável: os modelos reamostram para 16/11/44,1 kHz de qualquer forma
         "formato": "bestaudio[abr<=70]/worstaudio/bestaudio",
         "cookies": "",  # arquivo de cookies de uma conta SECUNDÁRIA; vazio = sem cookies
+        # experimental (#84): não apagar o áudio analisado, para reanalisar sem baixar (modelo novo etc.)
+        "guardar": False,
+        "guardar_dir": "",  # vazio = ~/.local/share/yt-music-curator/audios
     },
     "provedores": {
         # "bandcamp" fica fora: a busca exige desafio JS (ver provedores/bandcamp.py); dá para pôr de volta no config
@@ -100,6 +103,10 @@ class Caminhos:
     @property
     def modelos_dir(self) -> Path:
         return self.dados_dir / "models"
+
+    @property
+    def audios(self) -> Path:
+        return self.dados_dir / "audios"
 
     def garantir(self) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

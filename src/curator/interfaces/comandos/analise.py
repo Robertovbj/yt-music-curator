@@ -38,8 +38,13 @@ def analisar(
         "--aguardar",
         help="Com saídas em quarentena ou sem cota, espera em vez de parar (modo serviço).",
     ),
+    guardar_audio: bool = typer.Option(
+        False,
+        "--guardar-audio",
+        help="Experimental: guarda o áudio analisado para reanalisar sem baixar (o mesmo que [audio] guardar).",
+    ),
 ) -> None:
-    """Consome a fila: baixa o áudio, analisa com o Essentia, grava e apaga o áudio."""
+    """Consome a fila: baixa o áudio, analisa com o Essentia, grava e apaga o áudio (ou guarda, se pedido)."""
     try:
         from curator.audio.analisador import Analisador
     except ImportError:
@@ -48,7 +53,7 @@ def analisar(
 
     try:
         with trava_worker(caminhos().dados_dir / "worker.lock"):
-            rel = _rodar_worker(Analisador, limite, ate, aguardar)
+            rel = _rodar_worker(Analisador, limite, ate, aguardar, guardar_audio)
     except OutroWorkerRodando as e:
         typer.echo(f"{e}; nada a fazer.")  # código 0: o timer não registra falha
         return
@@ -64,12 +69,22 @@ def analisar(
         typer.echo(f"próxima saída disponível: {rel.proxima_liberacao.astimezone():%d/%m %H:%M}")
 
 
-def _rodar_worker(Analisador, limite: int | None, ate: str | None, aguardar: bool = False):  # noqa: N803
+def _rodar_worker(
+    Analisador,  # noqa: N803
+    limite: int | None,
+    ate: str | None,
+    aguardar: bool = False,
+    guardar: bool = False,
+):
     """Um worker por saída de rede ativa (direta + [[proxy]] do config), downloads em paralelo."""
-    from curator.audio import provedores
+    from curator.audio import guardados, provedores
     from curator.audio.worker import Compartilhado, instalar_sinais, rodar_em_paralelo
 
     cfg, con = carregar_config(), banco()
+    if guardar:
+        cfg["audio"]["guardar"] = True
+    if cfg["audio"]["guardar"]:
+        typer.echo(f"experimental: os áudios analisados ficam em {guardados.pasta(cfg)}", err=True)
     if n := enfileirar(con):
         typer.echo(f"{n} faixa(s) nova(s) na fila")
     proxies.sincronizar_config(con, cfg)
