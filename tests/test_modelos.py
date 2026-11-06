@@ -9,7 +9,11 @@ from curator.audio import modelos
 def test_manifesto_tem_todos_os_modelos_do_classifier():
     _, ms = modelos.manifesto()
     nomes = {m.nome for m in ms}
-    assert len(ms) == 22
+    assert len([m for m in ms if m.grupo == modelos.NUCLEO]) == 22
+    assert {m.nome for m in ms if m.grupo != modelos.NUCLEO} == {
+        "audioset-yamnet-1",
+        "discogs-maest-30s-pw-519l-2",
+    }
     assert {
         "discogs-effnet-bs64-1",
         "genre_discogs400-discogs-effnet-1",

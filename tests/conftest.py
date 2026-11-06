@@ -17,3 +17,4 @@ def sem_rede(monkeypatch):
         raise AssertionError("teste tentou acessar a rede (Deezer)")
 
     monkeypatch.setattr("curator.coleta.deezer.urllib.request.urlopen", recusar)
+    monkeypatch.setattr("curator.coleta.externos.urllib.request.urlopen", recusar)  # MusicBrainz (#88)

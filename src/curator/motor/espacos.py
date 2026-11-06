@@ -80,8 +80,22 @@ def normalizar_l2(X: np.ndarray) -> np.ndarray:
 _cache: dict[tuple, Matriz] = {}
 
 
+def _versao_extra(con: sqlite3.Connection, tipo: str) -> str:
+    """Os vetores das análises extras (#88) mudam sem mudar `hash_biblioteca`: entram na chave do cache à parte."""
+    from curator.audio.extras import EXTRAS
+
+    nome = next((n for n, e in EXTRAS.items() if tipo in e.tipos), None)
+    if nome is None:
+        return ""
+    n, ultima = con.execute(
+        "SELECT count(*), max(analisada_em) FROM analises_extras WHERE extra = ?", (nome,)
+    ).fetchone()
+    return f"{n}:{ultima}"
+
+
 def embeddings(con: sqlite3.Connection, tipo: str = "effnet_emb") -> Matriz:
-    chave = ("emb", tipo, str(con.execute("PRAGMA database_list").fetchone()[2]), hash_biblioteca(con))
+    chave = ("emb", tipo, str(con.execute("PRAGMA database_list").fetchone()[2]), hash_biblioteca(con),
+             _versao_extra(con, tipo))  # fmt: skip
     if chave not in _cache:
         linhas = con.execute(
             "SELECT v.video_id, v.dim, v.dados FROM vetores v JOIN analises a USING (video_id) "
@@ -97,7 +111,8 @@ def embeddings(con: sqlite3.Connection, tipo: str = "effnet_emb") -> Matriz:
 
 def probabilidades(con: sqlite3.Connection, tipo: str) -> Matriz:
     """Vetores completos de probabilidade (sem normalizar), com os rótulos como colunas."""
-    chave = ("prob", tipo, str(con.execute("PRAGMA database_list").fetchone()[2]), hash_biblioteca(con))
+    chave = ("prob", tipo, str(con.execute("PRAGMA database_list").fetchone()[2]), hash_biblioteca(con),
+             _versao_extra(con, tipo))  # fmt: skip
     if chave not in _cache:
         rotulos = [
             r[0]

@@ -79,6 +79,7 @@ class Resultado:
     duracao_s: float  # duração total do áudio (o worker compara com a da faixa)
     tempos: dict[str, float] = field(default_factory=dict)
     duracao_analisada_s: float | None = None  # < duracao_s quando a faixa passou de DURACAO_MAXIMA_S
+    extras: dict = field(default_factory=dict)  # {extra: extras.ResultadoExtra} (#88), no mesmo áudio
 
 
 def normalizar_1a9(x: float) -> float:
@@ -111,8 +112,9 @@ def concordancia_tempo(bpm_rhythm: float, bpm_tempocnn: float) -> str:
 class Analisador:
     """Carrega os modelos uma única vez; reutilize para a fila inteira."""
 
-    def __init__(self, pasta_modelos: Path, verificar_checksums: bool = True):
-        if verificar_checksums and (problemas := modelos.verificar(pasta_modelos)):
+    def __init__(self, pasta_modelos: Path, verificar_checksums: bool = True, extras=()):
+        """`extras`: nomes de `audio/extras.EXTRAS` calculados na mesma passada (#88), sem decodificar de novo."""
+        if verificar_checksums and (problemas := modelos.verificar(pasta_modelos, grupos={modelos.NUCLEO})):
             raise RuntimeError(
                 "modelos ausentes ou corrompidos: "
                 + "; ".join(problemas[:5])
@@ -153,6 +155,11 @@ class Analisador:
             for nome in MODELOS_AV
         }
         self.tempocnn = es.TempoCNN(graphFilename=mp("deeptemp-k16-3"))
+        self.extras = None
+        if extras:
+            from curator.audio.extras import AnalisadorExtras
+
+            self.extras = AnalisadorExtras(pasta_modelos, extras, verificar_checksums)
 
     def reamostrar(self, audio: np.ndarray, de: int, para: int, qualidade: int) -> np.ndarray:
         """Reamostrador do próprio Essentia (o mesmo do MonoLoader, usado nos exemplos oficiais dos modelos).
@@ -231,9 +238,17 @@ class Analisador:
         )
         etapa("tempo_tom")
 
+        resultados_extras = {}
+        if self.extras is not None:
+            resultados_extras = self.extras.analisar_audio(audio16)
+            tempos.update({f"extra_{n}": r.tempo_s for n, r in resultados_extras.items()})
+            marco = time.perf_counter()
+
         vetores = {k: np.asarray(v, dtype=np.float32) for k, v in vetores.items()}
         analisada = round(min(duracao, DURACAO_MAXIMA_S), 2)
-        return Resultado(features, vetores, rotulos_saida, round(duracao, 2), tempos, analisada)
+        return Resultado(
+            features, vetores, rotulos_saida, round(duracao, 2), tempos, analisada, resultados_extras
+        )
 
 
 def decodificar(caminho: Path) -> tuple[np.ndarray, int]:

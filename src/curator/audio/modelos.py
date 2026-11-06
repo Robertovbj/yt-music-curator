@@ -1,4 +1,8 @@
-"""Modelos Essentia: manifesto com SHA-256 (`modelos.toml`), download verificado e `hash_modelos`."""
+"""Modelos Essentia: manifesto com SHA-256 (`modelos.toml`), download verificado e `hash_modelos`.
+
+Cada modelo pertence a um grupo. O `nucleo` é o analisador principal: o `hash_modelos` cobre só ele, e mudá-lo
+reabre a fila inteira. Os outros grupos são as análises extras (#88, `audio/extras.py`), com versão própria.
+"""
 
 import hashlib
 import logging
@@ -10,6 +14,8 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+NUCLEO = "nucleo"
+
 
 @dataclass(frozen=True)
 class Modelo:
@@ -17,6 +23,7 @@ class Modelo:
     pasta: str
     pb_sha256: str
     json_sha256: str
+    grupo: str = NUCLEO
 
     def arquivos(self) -> list[tuple[str, str]]:
         return [(f"{self.nome}.pb", self.pb_sha256), (f"{self.nome}.json", self.json_sha256)]
@@ -29,11 +36,11 @@ def manifesto() -> tuple[str, list[Modelo]]:
     return dados["base_url"], [Modelo(**m) for m in dados["modelo"]]
 
 
-def hash_modelos() -> str:
-    """Identifica o conjunto de modelos; muda quando qualquer arquivo do manifesto muda."""
+def hash_modelos(grupo: str = NUCLEO) -> str:
+    """Identifica o conjunto de modelos de um grupo; muda quando qualquer arquivo dele muda."""
     _, modelos = manifesto()
     h = hashlib.sha256()
-    for m in sorted(modelos, key=lambda m: m.nome):
+    for m in sorted((m for m in modelos if m.grupo == grupo), key=lambda m: m.nome):
         h.update(f"{m.nome}:{m.pb_sha256}:{m.json_sha256}\n".encode())
     return h.hexdigest()[:16]
 
@@ -46,11 +53,13 @@ def _sha256(arquivo: Path) -> str:
     return h.hexdigest()
 
 
-def verificar(pasta: Path) -> list[str]:
-    """Problemas encontrados (vazio = tudo certo)."""
+def verificar(pasta: Path, nomes: set[str] | None = None, grupos: set[str] | None = None) -> list[str]:
+    """Problemas encontrados (vazio = tudo certo), em todos os modelos ou só nos `nomes`/`grupos` pedidos."""
     _, modelos = manifesto()
     problemas = []
     for m in modelos:
+        if (nomes is not None and m.nome not in nomes) or (grupos is not None and m.grupo not in grupos):
+            continue
         for nome, esperado in m.arquivos():
             arq = pasta / nome
             if not arq.exists():

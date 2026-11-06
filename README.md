@@ -51,12 +51,19 @@ A sincronização é total: uma música removida de uma playlist no YouTube Musi
 
 O `sincronizar` também guarda, de cada faixa, se é explícita e o tipo do vídeo (faixa de áudio, clipe ou vídeo de usuário), e busca as visualizações no YouTube e a data de publicação. Essas duas pedem uma chamada por faixa, então saem 300 por sincronização (`[metadados] estatisticas_por_rodada`; `--sem-estatisticas` pula). A API não informa quantas vezes você ouviu cada música.
 
+**Metadados externos.** O `sincronizar` também casa até 100 faixas por rodada (`[externos] por_rodada`; `--sem-externos` pula) com o Deezer e o MusicBrainz, pelo título, artista e duração (o MusicBrainz pelo ISRC do Deezer quando há). Ficam guardados os gêneros por faixa, álbum e artista, mais ISRC, BPM, popularidade no Deezer e datas. Se essas fontes valem o que custam ainda está em aberto (#91). O MusicBrainz aceita um pedido por segundo e pede um contato no User-Agent (`[externos] contato`, uma URL ou um e-mail).
+
+```sh
+uv run curator externos coletar      # todas as pendentes (pode ser interrompido e retomado)
+uv run curator externos status
+```
+
 ### Análise de áudio
 
 Requer o extra `analise`, além de `ffmpeg`/`ffprobe` e `deno` no sistema (o yt-dlp usa o Deno para resolver o desafio JavaScript do YouTube).
 
 ```sh
-uv run curator modelos baixar        # 22 modelos Essentia (~38 MB), verificados por SHA-256
+uv run curator modelos baixar        # 24 modelos Essentia (~400 MB, 350 deles do MAEST), verificados por SHA-256
 uv run curator analisar --limite 5   # baixa, analisa, grava e apaga o áudio
 uv run curator fila status           # pendentes, erros, saídas, estimativa de dias
 uv run curator analisar --ate 07:00  # lote até um horário
@@ -105,6 +112,13 @@ docker compose --env-file ~/.config/yt-music-curator/saidas.env up -d --build   
 docker compose --env-file ~/.config/yt-music-curator/saidas.env --profile celular up -d        # + celular
 ```
 
+**Análises extras.** Além do núcleo (EffNet e cabeças, MusiCNN, tempo e tom), o analisador guarda três visões de outras redes e outros treinos, cada uma com versão própria (`[analise] extras`): as 50 tags do MSD-MusiCNN, as 521 classes do YAMNet (AudioSet, com "Rapping" e "Singing") e os 519 estilos do MAEST. Faixas novas recebem os extras na mesma passada. Nas já analisadas, eles rodam sobre os áudios guardados, sem rede e sem reabrir a fila: ~16 s por faixa, quase tudo do MAEST. Um extra novo ou trocado refaz só ele.
+
+```sh
+uv run curator analisar --so-extras   # só os extras que faltam (provisória: sai quando a biblioteca tiver os extras, #92)
+uv run curator analisar --sem-extras  # pula os extras nesta execução
+```
+
 ### Receitas, classificação e planos
 
 Uma **receita** descreve uma playlist em JSON (o que o Claude vai escrever via MCP); o motor escolhe as músicas de forma determinística: mesma receita + mesmo banco = mesma lista.
@@ -131,7 +145,7 @@ uv run curator plano mostrar                            # o diff, agrupado por p
 
 Nomes de artistas, gêneros, features e playlists são conferidos com o banco; um nome errado é recusado com sugestão (`quis dizer: Banda Rock?`). Nada é aplicado no YouTube Music ainda: os planos ficam guardados para o M7.
 
-O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, igual para todos os gêneros. 1,0 é tão típico do gênero quanto a faixa mediana do núcleo dele na sua biblioteca, o conjunto de faixas que os dois modelos põem nesse gênero em primeiro lugar. Os níveis são 0,7 amplo, 0,8 normal e 1,0 estrito. Pelo MCP, `examinar_genero` mostra as faixas logo acima e logo abaixo do corte. Pop e Electronic quase não se separam pelo áudio. A decisão está no ADR-14, e a medição em `docs/avaliacao.md`.
+O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, igual para todos os gêneros. 1,0 é tão típico do gênero quanto a faixa mediana do núcleo dele na sua biblioteca, o conjunto de faixas que os dois modelos põem nesse gênero em primeiro lugar. O `examinar_genero` mostra também a mesma régua com o MAEST, que separa melhor rap e Electronic mas joga rock japonês no Pop. Por isso ela fica ao lado e não entra na receita (ADR-15, #93). Os níveis são 0,7 amplo, 0,8 normal e 1,0 estrito. Pelo MCP, `examinar_genero` mostra as faixas logo acima e logo abaixo do corte. Pop e Electronic quase não se separam pelo áudio. A decisão está no ADR-14, e a medição em `docs/avaliacao.md`.
 
 ## Desenvolvimento
 

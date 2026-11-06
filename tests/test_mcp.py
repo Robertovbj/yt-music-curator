@@ -42,7 +42,7 @@ def test_vocabulario(con):
 def test_vocabulario_mostra_a_regua_do_genero_pai(con):
     pais = {x["nome"]: x for x in m.descrever_vocabulario("generos_pai")["itens"]}
     hh = pais["Hip Hop"]
-    assert hh["regua"] == {"tipo": "nucleo", "faixas_no_nucleo": 14}
+    assert hh["regua"] == {"tipo": "nucleo", "faixas_no_nucleo": 14, "com_maest": False}
     assert (
         hh["faixas_por_nivel"]["amplo"]
         >= hh["faixas_por_nivel"]["normal"]
@@ -60,9 +60,66 @@ def test_examinar_genero_mostra_a_fronteira(con):
     assert len(r["abaixo"]) == 3 and all(
         i["afinidade"] < 0.8 and not i["video_id"].startswith("rap") for i in r["abaixo"]
     )
+    assert "outras_visoes" not in r["acima"][0]  # sem extras nem metadados externos ainda
     assert m.examinar_genero("Hip Hop", 0.8, universo="curtidas")["faixas_por_limite"]["0.8"] == 14
     erro = m.examinar_genero("hip")
     assert "não existe" in erro["erro"] and "Hip Hop" in erro["erro"]
+
+
+def test_examinar_genero_mostra_as_outras_visoes(con):
+    from curator.audio import extras
+    from curator.banco.conexao import agora
+
+    vid = m.examinar_genero("Hip Hop", 0.8, n=1)["acima"][0]["video_id"]
+    rot = ["Hip Hop---Trap", "Pop---Ballad", "Rock---Punk"]
+    yam = ["Rapping", "Singing", "Music"]
+    import numpy as np
+
+    extras.gravar(con, vid, {
+        "maest": extras.ResultadoExtra("h", {"maest519": np.array([0.6, 0.2, 0.2]), "maest519_max": np.zeros(3)},
+                                       {"maest519": rot, "maest519_max": rot}, 1.0),
+        "yamnet": extras.ResultadoExtra("h", {"yamnet": np.zeros(3), "yamnet_p90": np.array([0.4, 0.1, 0.9]),
+                                              "yamnet_emb": np.zeros(4)}, {"yamnet": yam, "yamnet_p90": yam}, 1.0),
+    }, "ref")  # fmt: skip
+    con.execute(
+        "INSERT INTO externos_faixas (video_id, fonte, status, buscado_em) VALUES (?, 'musicbrainz', 'ok', ?)",
+        (vid, agora()),
+    )
+    con.executemany(
+        "INSERT INTO externos_generos (video_id, fonte, nivel, rotulo, peso) VALUES (?, ?, ?, ?, ?)",
+        [(vid, "musicbrainz", "artista", "hip hop", 30), (vid, "musicbrainz", "artista", "pop rap", 5),
+         (vid, "musicbrainz", "faixa", "trap", 2), (vid, "deezer", "album", "rap/hip hop", 1)],
+    )  # fmt: skip
+    item = m.examinar_genero("Hip Hop", 0.8, n=1)["acima"][0]
+    assert item["outras_visoes"] == {
+        "maest": 0.6, "rapping": 0.4, "singing": 0.1, "generos_externos": ["hip hop", "pop rap", "rap/hip hop"],
+    }  # fmt: skip
+    assert "afinidade_com_maest" not in item  # uma faixa só com MAEST: o gênero ainda não tem a régua dele
+
+
+def test_examinar_genero_mostra_a_regua_com_maest_ao_lado(con):
+    import numpy as np
+
+    from curator.audio import extras
+
+    rot = ["Hip Hop---Trap", "Pop---Ballad", "Rock---Punk"]
+    antes = m.examinar_genero("Hip Hop", 0.8, n=14)
+    for i in range(14):
+        v = np.array([0.8, 0.2, 0.0] if i else [0.2, 0.8, 0.0])  # rap00: o MAEST acha que é pop
+        extras.gravar(con, f"rap{i:02d}", {"maest": extras.ResultadoExtra(
+            "h", {"maest519": v, "maest519_max": np.zeros(3)}, {"maest519": rot, "maest519_max": rot}, 1.0)}, "ref")  # fmt: skip
+    r = m.examinar_genero("Hip Hop", 0.8, n=14)
+    assert (
+        r["regua"]["com_maest"] and r["faixas_por_limite"] == antes["faixas_por_limite"]
+    )  # a receita não muda
+    itens = {i["video_id"]: i for i in r["acima"]}
+    assert itens["rap00"]["afinidade"] == next(
+        i["afinidade"] for i in antes["acima"] if i["video_id"] == "rap00"
+    )
+    assert itens["rap00"]["afinidade_com_maest"] < itens["rap00"]["afinidade"]
+    assert itens["rap05"]["afinidade_com_maest"] == pytest.approx(
+        (itens["rap05"]["afinidade"] + 1.0) / 2, abs=1e-3
+    )
 
 
 def test_executar_receita_devolve_erros_para_a_ia_corrigir(con):
