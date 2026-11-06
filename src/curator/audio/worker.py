@@ -242,12 +242,7 @@ class Worker:
         return rel
 
     def _pausa(self) -> float:
-        """Entre downloads: a pausa do `[[proxy]]` desta saída, se ele definir uma, senão a do `[fila]`."""
-        f = self.cfg["fila"]
-        p = next((p for p in self.cfg.get("proxy", []) if p.get("nome") == self.saida), {})
-        return self.rng.uniform(
-            p.get("intervalo_min_s", f["intervalo_min_s"]), p.get("intervalo_max_s", f["intervalo_max_s"])
-        )
+        return pausa_da_saida(self.cfg, self.saida, self.rng)
 
     def _devolver(self, item) -> None:
         """Depois de uma trava do banco: a faixa reservada volta a pendente (se o banco deixar)."""
@@ -374,6 +369,15 @@ class Worker:
             VERSAO_ANALISADOR, self.analisador.hash_modelos, round(time.perf_counter() - inicio, 2),
         )  # fmt: skip
         return "ok"
+
+
+def pausa_da_saida(cfg: dict, saida: str | None, rng: random.Random) -> float:
+    """Entre downloads: a pausa do `[[proxy]]` desta saída, se ele definir uma, senão a do `[fila]`."""
+    f = cfg["fila"]
+    p = next((p for p in cfg.get("proxy", []) if p.get("nome") == saida), {})
+    return rng.uniform(
+        p.get("intervalo_min_s", f["intervalo_min_s"]), p.get("intervalo_max_s", f["intervalo_max_s"])
+    )
 
 
 def _travado(e: sqlite3.OperationalError) -> bool:
