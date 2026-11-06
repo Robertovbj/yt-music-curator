@@ -21,6 +21,8 @@
 - [ADR-11: Visualizador gráfico](#adr-11-visualizador-gráfico)
 - [ADR-12: Segurança e higiene](#adr-12-segurança-e-higiene)
 - [ADR-13: Recomendações fora da biblioteca](#adr-13-recomendações-fora-da-biblioteca)
+- [ADR-14: Afinidade de gênero-pai (#83)](#adr-14-afinidade-de-gênero-pai-83)
+- [ADR-15: Análises extras e metadados externos (#88)](#adr-15-análises-extras-e-metadados-externos-88)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -583,6 +585,39 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Rap com cara de pop fica abaixo do corte (Houdini 0,57; Can't Hold Us 0,55).
 - Os caminhos para melhorar estão na #88: modelos de outra rede e outro treino (YAMNet, que tem a classe "Rapping"; tags do MSD-MusiCNN; MAEST) e metadados de gênero.
 
+## ADR-15: Análises extras e metadados externos (#88)
+
+**Problema:** na #83, a fusão do Discogs400 com o MTG-Jamendo ganhou pouco porque as duas cabeças usam o mesmo embedding EffNet (ADR-14). Ensembles ganham com diversidade entre os membros (Kuncheva & Whitaker, 2003). Faltava uma visão de outra rede, de outro treino ou de fora do áudio. Ao mesmo tempo, qualquer modelo novo reabria a fila inteira (`hash_modelos`), e o download é a parte demorada.
+
+**Decisão**
+1. **Análises extras com versão própria** (`audio/extras.py`, tabela `analises_extras`, migração 017). O manifesto ganhou o campo `grupo`: o `hash_modelos` cobre só o `nucleo`, e cada extra tem um hash próprio (versão do cálculo + SHA-256 dos modelos). Um extra novo ou trocado refaz só ele, a partir dos áudios guardados (#84/#90), sem rede e sem reabrir a fila. Faixas novas recebem os extras na mesma passada do núcleo, sem decodificar o áudio de novo. A falha de um extra (ex.: faixa curta demais para o MAEST) fica registrada e não derruba os outros.
+   - **Tags do MSD-MusiCNN** (`msd_tags`, 50): o modelo já rodava para o embedding, e as tags do Last.fm (Hip-Hop, rnb, pop, rock…) eram descartadas. ~2,4 s por faixa (uma segunda passada do MusiCNN).
+   - **YAMNet** (`yamnet`, `yamnet_p90`, `yamnet_emb`): 521 classes do AudioSet (Gemmeke et al., 2017), treinado em vídeos do YouTube, com "Rapping", "Singing" e classes de gênero. Média e percentil 90 dos quadros de ~1 s, porque um trecho de rap numa faixa cantada some na média. ~0,9 s.
+   - **MAEST 30 s** (`maest519`, `maest519_max`): transformer com 519 estilos do Discogs (Alonso-Jiménez et al., 2023). A mesma taxonomia do Discogs400, mas outra rede e outro conjunto de treino. Média e maior trecho de 30 s. ~12 s, o grosso do custo. O embedding dele custaria outra passada inteira e ficou de fora; com o áudio guardado, dá para calcular depois.
+2. **Metadados externos** (`coleta/externos.py`, migração 018): Deezer (sem chave) → ISRC, BPM, ganho, popularidade, datas e gêneros do álbum; MusicBrainz (sem chave, 1 pedido/s) pelo ISRC ou por busca → gêneros e tags da gravação, do release group e do artista. O Last.fm ficou de fora: pede chave de API e cadastro para pouco além das tags que o MusicBrainz já traz. O casamento usa as regras do ADR-08 (título, artista, duração ±3 s, sem variantes). Erro de rede nunca vira cache (nova tentativa em 1 h, 2 h, 4 h… até 7 dias); `sem-casamento` e `ok` valem 90 dias. Para propagar gênero, a similaridade por tags sociais e por filtragem colaborativa foi melhor que a de áudio em Kim, Tomasik & Turnbull (2009); e as taxonomias de gênero de fontes diferentes (AllMusic, Discogs, Last.fm, Tagtraum) não coincidem, o que leva a tratá-las como visões separadas (Bogdanov et al., 2019).
+3. **A IA vê as outras visões na fronteira:** `examinar_genero` mostra, em cada faixa perto do corte, a fração do pai no MAEST, "Rapping"/"Singing" do YAMNet (no Hip Hop), os gêneros externos do artista e do álbum e a `afinidade_com_maest` (item 4). A afinidade da receita não muda.
+4. **A régua com o MAEST fica ao lado, e a das receitas segue a do ADR-14** (motor v2). A régua com o MAEST (`generos.relativa_com_maest`) é a média de duas réguas, a do Discogs + Jamendo e a da fração do MAEST, cada uma relativa ao mesmo núcleo (ADR-14). Uma faixa sem MAEST fica só com a primeira, e o mesmo vale para um pai com menos de 10 faixas do núcleo com MAEST.
+   - **Onde ela ganha:** no rap faixa a faixa (os 64 casos difíceis da #83), a AUC vai de 0,946 para 0,993 [0,977; 1,000], com ganho pareado de +0,011 a +0,100. No 0,8, os falsos positivos do rap caem de 14% para 0% (Heat Waves 0,95 → 0,62; Stressed Out 1,03 → 0,72). No Electronic por artista, a revocação no 0,8 sobe de 0,59 para 0,78, com os mesmos falsos positivos.
+   - **Onde ela perde:** no rock japonês. O MAEST dá "Pop---J-pop" de 0,5 a 0,8 a kessoku band, the peggies, Houkago Teatime e BABYMETAL, e no Discogs J-pop é etiqueta de mercado (música popular japonesa), que cobre rock, idol e anime. No 0,8, a revocação do Rock no gabarito cai de 0,84 para 0,73. Nas 96 faixas da biblioteca com J-pop forte no MAEST, o Rock vai de 34 para 12 faixas e o Pop de 34 para 58.
+   - **Por que não um ajuste à mão:** tratar J-pop e K-pop como neutros conserta o rock japonês, mas tira do Pop o pop idol e de anime (as faixas sem nenhum pai ≥ 0,8 vão de 16 para 36 das 96), e o gabarito não tem pop japonês para medir isso. Qualquer regra fixa erra um dos lados.
+   - **O caminho:** um gênero aprendido com os rótulos do usuário (#93). No teste de viabilidade (validação deixando o artista inteiro de fora), ele levou o Pop por artista de 0,848 para 0,982 e pôs todo o rock japonês no Rock. Mas caiu para 0,704 no rap faixa a faixa, porque rótulos por artista ensinam o som do artista; faltam rótulos por faixa nas fronteiras.
+   - **Ressalva:** o Discogs400 e o MAEST aprenderam com rótulos do Discogs, que provavelmente inclui essas mesmas músicas conhecidas. Os ganhos comparam os modelos entre si; não medem generalização para música nova.
+   - As duas réguas são calculadas na hora a partir dos dados guardados. Trocar a das receitas depois não exige reanalisar nada.
+
+**Testado e não adotado** (medições em `docs/avaliacao.md`; os dados ficam guardados e visíveis):
+- **YAMNet nas classes de gênero:** 0,911 no rap, pior que o motor. "Rapping" − "Singing" deu 0,966, dentro do ruído. Aparece como outra visão no `examinar_genero`.
+- **Tags do MSD-MusiCNN:** 0,975 [0,939; 0,997], dentro do ruído contra o motor. A fusão com MAEST, YAMNet e MSD (0,992) não ganha da régua com o MAEST (0,993).
+- **Metadados externos na régua:** deram 1,000 no rap e 0,996 no Pop por artista. Só que os gêneros são do artista e do álbum, e o gabarito por artista os favorece por construção (Flexer, 2007). Na régua, eles puxariam todas as faixas de um artista para o mesmo gênero, o oposto do que ela faz hoje, faixa a faixa. Ficam para a IA na fronteira e para uso futuro (#87). Se valem o que custam fica para a #91.
+- **Suavizar pelos vizinhos no EffNet** (sem rótulo): mesma AUC, e o rock japonês não sobe, porque os vizinhos dele são outro rock japonês, com a mesma nota.
+- **As outras cabeças do Essentia** (FMA, MagnaTagATune, MTG-Jamendo top50tags, MTG-Jamendo sobre o embedding "multi" e as antigas Dortmund, Rosamerica e GTZAN): nenhuma passa o MAEST no Rock, no Electronic ou no rap. A melhor no Pop (top50tags, 0,912) fica abaixo do modelo aprendido (0,982). Todas usam o mesmo EffNet do núcleo. Ficam como candidatas a atributo na #93.
+- **Last.fm:** pede chave de API e cadastro para pouco além das tags que o MusicBrainz já traz.
+
+**Limites conhecidos:**
+- Os gêneros externos são do artista e do álbum muito mais que da faixa (no MusicBrainz, poucas gravações têm voto). Eles não separam as faixas de um mesmo artista, que é justamente o caso difícil (Alec Benjamin, Twenty One Pilots).
+- O mapa de rótulos externos para os pais do Discogs (`generos.pais_de_rotulo`) é uma heurística por palavras.
+- O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). O `curator analisar --so-extras` é a forma provisória de passá-la nas faixas já analisadas e sai quando a biblioteca estiver completa (#92).
+- Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos até a #93.
+
 ---
 
 ## Fluxos dos pedidos de exemplo
@@ -590,7 +625,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 | Pedido | Fluxo |
 |---|---|
 | "Quero uma playlist para dirigir, músicas que me deem vontade de sair fazendo drift" | A IA consulta `descrever_vocabulario` e monta uma receita com `perfil_alvo` de energy, aggressive e arousal altos, BPM 120–160 e danceability média/alta, e `generos_preferidos` com os estilos eletrônicos e agressivos existentes (como industrial, phonk e drum & bass, se estiverem no vocabulário). Pode usar como `sementes` 3–5 faixas que você citar. → `executar_receita` → você ajusta → `salvar_receita` → plano. |
-| "Quero uma playlist de rap" | Receita com filtro duro: gênero-pai **Hip Hop** ≥ 0,8 na régua relativa (ADR-14), conferida antes com `examinar_genero`, e `max.instrumental` 0,5 para tirar o lo-fi instrumental. Sem perfil-alvo, ordenada pela afinidade do gênero e com diversidade por artista. |
+| "Quero uma playlist de rap" | Receita com filtro duro: gênero-pai **Hip Hop** ≥ 0,8 na régua relativa (ADR-14), conferida antes com `examinar_genero` (que mostra também a régua com o MAEST, ADR-15), e `max.instrumental` 0,5 para tirar o lo-fi instrumental. Sem perfil-alvo, ordenada pela afinidade do gênero e com diversidade por artista. |
 | "Quero uma playlist de rock geral, e uma playlist com meus subgêneros centrais de rock" | (1) Receita com o gênero-pai **Rock** ≥ 0,7 (nível amplo, ADR-14). (2) Dentro desse universo, o motor soma a massa dos estilos `Rock---*`, escolhe os estilos que concentram a maior parte da sua biblioteca, ou roda `sugerir_reorganizacao` restrito a esse universo, e gera uma playlist por subgênero central. Uma faixa pode entrar em várias. Se a árvore já tiver "Rock - All" e filhas, o plano propõe ajustes nela em vez de duplicar. |
 | "Veja todas minhas músicas curtidas que ainda não estão em uma playlist, e me diga onde colocar" | `classificar_nao_alocadas` (ADR-06): multi-rótulo hierárquico. As faixas "sem destino" vêm agrupadas como possíveis playlists novas. → plano. |
 | "Veja todas as minhas músicas. Sugira playlists para eu poder organizar melhor" | `sugerir_reorganizacao` (ADR-07): clusters sobrepostos, nomes dados pela IA a partir das estatísticas, sugestões de fusão e divisão comparando com a árvore atual. → plano. |
@@ -644,4 +679,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Pampalk, E., Flexer, A., & Widmer, G. (2005). *Improvements of audio-based music similarity and genre classification*. ISMIR 2005.
 - Flexer, A. (2007). *A closer look on artist filters for musical genre classification*. ISMIR 2007.
 - Lippens, S., Martens, J.-P., & De Mulder, T. (2004). *A comparison of human and automatic musical genre classification*. ICASSP 2004.
+- Gemmeke, J. F., Ellis, D. P. W., Freedman, D., Jansen, A., Lawrence, W., Moore, R. C., Plakal, M., & Ritter, M. (2017). *Audio Set: An ontology and human-labeled dataset for audio events*. ICASSP 2017. YAMNet: <https://github.com/tensorflow/models/tree/master/research/audioset/yamnet>.
+- Alonso-Jiménez, P., Serra, X., & Bogdanov, D. (2023). *Efficient Supervised Training of Audio Transformers for Music Representation Learning*. ISMIR 2023. arXiv:2309.16418.
+- Kim, J. H., Tomasik, B., & Turnbull, D. (2009). *Using Artist Similarity to Propagate Semantic Information*. ISMIR 2009.
 - Sturm, B. L. (2014). *A simple method to determine if a music information retrieval system is a "horse"*. IEEE Transactions on Multimedia, 16(6), 1636–1644. doi:10.1109/TMM.2014.2330697.

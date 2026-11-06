@@ -4,6 +4,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from curator.audio import extras
 from curator.audio.analisador import Resultado
 from curator.banco import vetores
 from curator.banco.conexao import agora, transacao
@@ -60,9 +61,17 @@ def gravar_analise(
             f"VALUES (?, {', '.join('?' * len(COLUNAS_FEATURES))})",
             (video_id, *valores),
         )
-        con.execute("DELETE FROM vetores WHERE video_id = ?", (video_id,))
+        # os extras (#88) têm versão própria: só caem se o áudio mudou de fonte
+        antes = con.execute("SELECT fonte_ref FROM analises WHERE video_id = ?", (video_id,)).fetchone()
+        if antes and antes[0] != origem.ref:
+            extras.descartar(con, video_id)
+        con.execute(
+            f"DELETE FROM vetores WHERE video_id = ? AND tipo NOT IN ({','.join('?' * len(extras.TIPOS_EXTRAS))})",
+            (video_id, *extras.TIPOS_EXTRAS),
+        )
         for tipo, v in r.vetores.items():
             vetores.gravar(con, video_id, tipo, v)
+        extras.gravar(con, video_id, r.extras, origem.ref)
         _gravar_status(
             con, video_id, "ok", versao=versao, hash_modelos=hash_modelos, origem=origem,
             duracao=r.duracao_analisada_s or r.duracao_s, tempo_s=tempo_s, tempos=r.tempos,

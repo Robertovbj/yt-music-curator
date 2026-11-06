@@ -1,7 +1,8 @@
 """Avaliação do gênero-pai (#83, docs/avaliacao.md, ADR-14).
 
 Compara, num gabarito pessoal (fora do repositório), o critério antigo (maior estilo do Discogs400), a fração do
-Discogs e a afinidade do motor (fração Discogs + Jamendo), e mostra a régua relativa por gênero.
+Discogs, a afinidade do motor (Discogs + Jamendo) e a régua com o MAEST que fica ao lado (#88, ADR-15), e mostra as
+duas réguas relativas por gênero.
 
 - AUC: chance de uma faixa do gênero ficar com nota maior que uma de fora (1,0 = separação perfeita), com
   intervalo de 95% por bootstrap no gabarito faixa a faixa.
@@ -73,8 +74,22 @@ def main() -> None:
             "maior estilo (antigo)": D[:, cols].max(axis=1),
             "fração Discogs": D[:, cols].sum(axis=1) / np.maximum(D.sum(axis=1), 1e-12),
             "afinidade (motor)": F[:, k],
-            "relativa": F[:, k] / afin.reguas[pai].referencia,
+            "com MAEST (#88, ao lado)": afin.relativa_com_maest(pai, ids),
+            "relativa": afin.relativa(pai, ids),
+            "relativa com MAEST": afin.relativa_com_maest(pai, ids),
         }
+
+    def cortes(s: dict[str, np.ndarray], pos: np.ndarray, neg: np.ndarray) -> str:
+        return "\n".join(
+            f"             {nome:19}"
+            + "  ".join(
+                f"≥{t}: {np.mean(s[nome][pos] >= t):.2f}/{np.mean(s[nome][neg] >= t):.2f}"
+                for t in generos.NIVEIS.values()
+            )
+            for nome in ("relativa", "relativa com MAEST")
+        )
+
+    so_auc = ("relativa", "relativa com MAEST")
 
     rotulo = {}
     for pai, nomes in gab.get("artistas", {}).items():
@@ -85,20 +100,16 @@ def main() -> None:
     print(f"{len(ids)} faixas analisadas; gabarito por artista: {len(rotulo)} faixas")
     print("\nRégua de cada gênero:")
     for p, r in afin.reguas.items():
-        print(f"  {p:24} {r.tipo:13} núcleo {r.nucleo:4d}  referência {r.referencia:.3f}")
+        m = f"  MAEST {r.referencia_maest:.3f}" if r.referencia_maest else ""
+        print(f"  {p:24} {r.tipo:13} núcleo {r.nucleo:4d}  referência {r.referencia:.3f}{m}")
 
     print("\nGabarito por artista (AUC; revocação/falsos+ na régua relativa):")
     for pai in gab.get("artistas", {}):
         pos = np.array([pos_id[v] for v, g in rotulo.items() if g == pai])
         neg = np.array([pos_id[v] for v, g in rotulo.items() if g != pai])
         s = sinais(pai)
-        aucs = "  ".join(f"{n} {auc(x[pos], x[neg]):.3f}" for n, x in s.items() if n != "relativa")
-        rel = s["relativa"]
-        regua = "  ".join(
-            f"≥{t}: {np.mean(rel[pos] >= t):.2f}/{np.mean(rel[neg] >= t):.2f}"
-            for t in generos.NIVEIS.values()
-        )
-        print(f"  {pai:10} ({len(pos)} × {len(neg)}): {aucs}\n             {regua}")
+        aucs = "  ".join(f"{n} {auc(x[pos], x[neg]):.3f}" for n, x in s.items() if n not in so_auc)
+        print(f"  {pai:10} ({len(pos)} × {len(neg)}): {aucs}\n{cortes(s, pos, neg)}")
 
     for pai, grupos in gab.get("faixas", {}).items():
         pos = np.array([pos_id[v] for v in grupos.get("sim", []) if v in pos_id])
@@ -106,17 +117,10 @@ def main() -> None:
         print(f"\nGabarito faixa a faixa, {pai} ({len(pos)} × {len(neg)}): AUC [IC 95%]")
         s = sinais(pai)
         for n, x in s.items():
-            if n != "relativa":
+            if n not in so_auc:
                 lo, hi = bootstrap(x[pos], x[neg])
-                print(f"  {n:22} {auc(x[pos], x[neg]):.3f} [{lo:.3f}, {hi:.3f}]")
-        rel = s["relativa"]
-        print(
-            "  régua: "
-            + "  ".join(
-                f"≥{t}: {np.mean(rel[pos] >= t):.2f}/{np.mean(rel[neg] >= t):.2f}"
-                for t in generos.NIVEIS.values()
-            )
-        )
+                print(f"  {n:24} {auc(x[pos], x[neg]):.3f} [{lo:.3f}, {hi:.3f}]")
+        print(cortes(s, pos, neg))
 
 
 if __name__ == "__main__":

@@ -126,3 +126,88 @@ Com essa regra, `curator classificar` sugere playlists demais para cada faixa n�
 
 Vizinhos no MusiCNN: k de 5 a 30 e peso de 0,3 a 0,7 deram AUC entre 0,93 e 0,97 no rap. O resultado é estável, e nenhuma configuração sai do ruído.
 
+
+## Sinais novos de gênero (#88)
+
+**Data:** 2026-11-06 · **Decisão:** ADR-15 · **Scripts:** `contrib/avaliacao/sinais_genero.py` (todos os sinais) e `contrib/avaliacao/genero_pai.py` (as duas réguas). Mesmo gabarito da #83. Medido numa cópia do banco, com os extras calculados sobre os áudios guardados pela #90. A primeira medição (noite de 05/11) tinha o MAEST em todo o rap faixa a faixa, mas só em parte do gabarito por artista. Os números abaixo são da segunda (manhã de 06/11), com o MAEST nas 388 faixas do gabarito por artista.
+
+**Rap faixa a faixa** (43 rap × 21 não rap; AUC [IC 95%]; Δ = IC pareado contra o motor v2, nas mesmas faixas):
+
+| Sinal | AUC | Δ vs motor v2 |
+|---|---|---|
+| Motor v2 (Discogs + Jamendo) | 0,946 [0,884; 0,989] | — |
+| MAEST, média dos trechos | 1,000 [1,000; 1,000] | +0,011 a +0,116 |
+| MAEST, maior trecho | 0,994 [0,980; 1,000] | +0,006 a +0,107 |
+| YAMNet, classes de gênero (média) | 0,911 [0,833; 0,968] | −0,106 a +0,028 |
+| YAMNet "Rapping" − "Singing" (média) | 0,966 [0,913; 0,997] | −0,037 a +0,082 |
+| Tags do MSD-MusiCNN | 0,975 [0,939; 0,997] | −0,022 a +0,090 |
+| Externos (MusicBrainz + Deezer; 55 faixas com dado) | 1,000 [1,000; 1,000] | +0,013 a +0,137 |
+| Fusão motor + MAEST + YAMNet + MSD | 0,992 [0,975; 1,000] | +0,010 a +0,102 |
+| **Régua com o MAEST** (`relativa_com_maest`: motor + MAEST, réguas relativas) | **0,993 [0,977; 1,000]** | +0,011 a +0,100 |
+
+**Por artista** (AUC; entre parênteses, as faixas com externos; os outros sinais cobrem as 388):
+
+| Pai | Motor v2 | Com o MAEST | MAEST | YAMNet | Tags MSD | Externos |
+|---|---|---|---|---|---|---|
+| Hip Hop | 0,997 | 1,000 | 1,000 | 0,990 | 0,998 | 1,000 (31) |
+| Rock | 0,996 | 0,996 | 0,992 | 0,991 | 0,969 | 1,000 (122) |
+| Pop | 0,848 | 0,872 | 0,875 | 0,683 | 0,898 | 0,996 (174) |
+| Electronic | 0,866 | 0,937 | 0,960 | 0,744 | 0,802 | 1,000 (32) |
+
+- Os externos ganham no Pop e no Electronic, mas são gêneros do artista medidos num gabarito por artista. A ressalva de Flexer (2007) vale inteira aqui (ver ADR-15 e a #91).
+
+**As duas réguas** (revocação / falsos positivos):
+
+| Gabarito | Régua | ≥ 0,7 | ≥ 0,8 | ≥ 1,0 |
+|---|---|---|---|---|
+| Rap faixa a faixa | v2 (receitas) | 0,91 / 0,33 | 0,91 / 0,14 | 0,84 / 0,05 |
+| | com o MAEST | 0,95 / 0,05 | 0,88 / 0,00 | 0,77 / 0,00 |
+| Hip Hop por artista | v2 | 0,90 / 0,01 | 0,82 / 0,00 | 0,78 / 0,00 |
+| | com o MAEST | 0,93 / 0,00 | 0,78 / 0,00 | 0,70 / 0,00 |
+| Rock por artista | v2 | 0,90 / 0,02 | 0,84 / 0,01 | 0,51 / 0,00 |
+| | com o MAEST | 0,87 / 0,00 | 0,73 / 0,00 | 0,46 / 0,00 |
+| Pop por artista | v2 | 0,37 / 0,10 | 0,21 / 0,04 | 0,05 / 0,01 |
+| | com o MAEST | 0,36 / 0,08 | 0,26 / 0,06 | 0,03 / 0,01 |
+| Electronic por artista | v2 | 0,75 / 0,19 | 0,59 / 0,12 | 0,41 / 0,05 |
+| | com o MAEST | 0,88 / 0,18 | 0,78 / 0,11 | 0,56 / 0,03 |
+
+- No rap, os falsos positivos da v2 no 0,8 eram Heat Waves (0,95; 0,62 com o MAEST), Stressed Out (1,03 → 0,72) e Thunder (0,83 → 0,50). Com o MAEST, abaixo de 0,7 ficam Can't Hold Us (0,55) e Fight Back (0,62), e entre 0,7 e 0,8, The Monster, Tauz ("Call of Duty") e Houdini.
+- **O rock japonês:** das 24 faixas de Rock do gabarito que caem abaixo de 0,8 com o MAEST, 22 são de kessoku band, the peggies, Houkago Teatime e BABYMETAL. O MAEST dá a elas de 0,5 a 0,8 em "Pop---J-pop". No Discogs, J-pop é uma etiqueta de mercado (música popular japonesa) que cobre rock, idol e anime. Nas 96 faixas da biblioteca com J-pop ≥ 0,5 no MAEST (cópia de 06/11), a régua com ele leva o Rock (≥ 0,8) de 34 para 12 faixas e o Pop de 34 para 58.
+- **J-pop neutro (testado, não adotado):** zerar J-pop e K-pop no MAEST conserta o Rock (0,86 / 0,00 no 0,8) e sobe o Pop (AUC 0,968). Em troca, tira do Pop o pop idol e de anime (Hoshimachi Suisei, ClariS, Ado): das 96, as faixas sem nenhum pai ≥ 0,8 vão de 16 para 36. O gabarito não tem pop japonês, então não enxerga esse custo.
+- **Decisão:** a régua das receitas segue a v2, e a com o MAEST fica ao lado, no `examinar_genero` (ADR-15).
+
+**Aprendido com os rótulos** (viabilidade para a #93): regressão logística (C = 0,05, sem ajuste) sobre EffNet + MAEST, treinada no gabarito por artista e validada deixando o artista inteiro de fora (10 dobras por artista, 65 artistas):
+
+| AUC | v2 | Com o MAEST | Aprendido |
+|---|---|---|---|
+| Hip Hop | 0,997 | 1,000 | 0,999 |
+| Rock | 0,996 | 0,996 | 0,993 |
+| Pop | 0,848 | 0,872 | **0,982** |
+| Electronic | 0,866 | 0,937 | 0,920 |
+| Rap faixa a faixa | 0,946 | **0,993** | 0,704 |
+
+- As 46 faixas de rock japonês foram todas para o Rock, com o próprio artista fora do treino.
+- No rap faixa a faixa, cai para 0,704. Treinado com rótulos por artista, o modelo aprende o som do artista (Flexer, 2007), e os casos difíceis são justamente faixas fora do padrão do artista. Para essas fronteiras, precisa de rótulos por faixa.
+- Só conhece os quatro pais rotulados. Os outros (trilha sonora, clássica) ficam com a régua.
+
+**Vizinhos sem rótulo (testado, não adotado):** a média da régua com o MAEST e a dos 10 vizinhos no EffNet deu a mesma AUC (Rock 0,997, Electronic 0,929). O rock japonês continuou com 41% das faixas ≥ 0,8, porque os vizinhos dele são outro rock japonês, com a mesma nota.
+
+**Cabeças do Essentia ainda não usadas** (AUC; as 411 faixas dos dois gabaritos, com o EffNet recalculado sobre o áudio guardado; fração dos rótulos de cada pai, com o mapa definido antes de olhar; "—" = a cabeça não tem o pai):
+
+| Cabeça | Hip Hop | Rock | Pop | Electronic | Rap faixa a faixa |
+|---|---|---|---|---|---|
+| Motor v2 | 0,997 | 0,996 | 0,848 | 0,866 | 0,946 |
+| MAEST (fração) | 1,000 | 0,992 | 0,875 | 0,960 | 1,000 |
+| FMA small | 0,998 | 0,998 | 0,829 | 0,798 | 0,960 |
+| MagnaTagATune | — | 0,998 | 0,895 | 0,771 | — |
+| MTG-Jamendo top50tags | 0,997 | 0,997 | 0,912 | 0,843 | 0,940 |
+| MTG-Jamendo sobre o embedding "multi" | 0,997 | 0,996 | 0,856 | 0,765 | 0,956 |
+| Dortmund | 0,997 | 0,991 | 0,883 | 0,853 | 0,967 |
+| Rosamerica | 0,995 | 0,998 | 0,888 | 0,826 | 0,915 |
+| GTZAN | 0,992 | 0,991 | 0,889 | — | 0,878 |
+
+- Nenhuma passa o MAEST no Rock, no Electronic ou no rap. A melhor no Pop (top50tags, 0,912) fica longe do modelo aprendido (0,982).
+- Todas rodam sobre o mesmo EffNet do núcleo, então trazem pouca diversidade (a lição do ADR-14). As antigas (Dortmund, Rosamerica, GTZAN, subgêneros de Electronic) saíram da documentação do Essentia e foram treinadas com 250 a 1.820 trechos.
+- Ficam como candidatas a atributo do modelo aprendido (#93), não como régua.
+
+**Custo** (faixa de ~3 min 30 s, CPU de 8 núcleos): núcleo ~7 s; tags do MSD ~2,4 s; YAMNet ~0,9 s; MAEST ~12 s. A RAM do worker vai de 1,5 GB para 2,8 GB. Metadados: ~1,5 s por faixa no Deezer e ~4,4 s no MusicBrainz (1 pedido/s). Na amostra, 88% casaram no Deezer e 90% no MusicBrainz, antes do casamento mais tolerante a títulos "original - tradução".

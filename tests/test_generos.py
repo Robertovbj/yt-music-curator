@@ -120,3 +120,48 @@ def test_execucao_salva_guarda_a_versao_do_motor(con):
     receitas.salvar(con, Receita(nome="Rap", filtros={"genero_pai_min": {"Poucos": 0.8}}), "rap")
     receitas.executar_e_registrar(con, "Rap")
     assert [h["versao_motor"] for h in receitas.execucoes(con, "Rap")] == ["2"]
+
+
+MAEST = ["Poucos---Unico", "Muitos---E0", "Outro---X"]
+
+
+def com_maest(con, vid, vetor):
+    from curator.audio import extras
+
+    extras.gravar(con, vid, {"maest": extras.ResultadoExtra(
+        "h", {"maest519": np.array(vetor, np.float32), "maest519_max": np.zeros(3, np.float32)},
+        {"maest519": MAEST, "maest519_max": MAEST}, 1.0)}, vid)  # fmt: skip
+
+
+def test_regua_com_maest_fica_ao_lado_e_relativa_ao_mesmo_nucleo(con):
+    """#88: média da régua do Discogs+Jamendo com a do MAEST; faixa sem MAEST fica só com a primeira. A régua das
+    receitas (`relativa`) não muda."""
+    for i in range(12):
+        faixa(con, f"p{i:02d}", so({0: 0.6, 9: 0.2}))
+    a = generos.Afinidades(con)
+    assert a.reguas["Poucos"].referencia_maest is None  # sem MAEST ainda: nada muda
+    antes = a.relativa("Poucos", ["p00"])[0]
+    for i in range(12):
+        com_maest(con, f"p{i:02d}", [0.8, 0.0, 0.2])
+    faixa(con, "fora", so({0: 0.6, 9: 0.2}))  # o Discogs acha que é do gênero
+    com_maest(con, "fora", [0.1, 0.0, 0.9])  # o MAEST discorda
+    faixa(con, "sem", so({0: 0.6, 9: 0.2}))  # sem MAEST
+    a = generos.Afinidades(con)
+    reg = a.reguas["Poucos"]
+    assert reg.referencia_maest == pytest.approx(0.8) and reg.nucleo == 14
+    assert a.relativa("Poucos", ["p00", "fora", "sem"]).tolist() == pytest.approx([antes] * 3)
+    rel = a.relativa_com_maest("Poucos", ["p00", "fora", "sem"])
+    assert rel[0] == pytest.approx(antes) and rel[2] == pytest.approx(antes)
+    assert rel[1] == pytest.approx((antes + 0.1 / 0.8) / 2)
+    assert a.relativa_com_maest("Não existe", ["p00"]).tolist() == [0.0]
+
+
+def test_maest_nao_muda_a_receita(con):
+    for i in range(12):
+        faixa(con, f"p{i:02d}", so({0: 0.6, 9: 0.2}))
+    r = Receita.model_validate({"nome": "x", "filtros": {"genero_pai_min": {"Poucos": 0.5}}})
+    antes = executar(con, r)
+    for i in range(12):
+        com_maest(con, f"p{i:02d}", [0.1 if i % 2 else 0.8, 0.0, 0.9])  # o MAEST discorda em metade
+    depois = executar(con, r)
+    assert (depois.ids, depois.versao_banco) == (antes.ids, antes.versao_banco)

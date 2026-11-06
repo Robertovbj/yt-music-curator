@@ -21,6 +21,12 @@ PADRAO: dict = {
         "estatisticas_por_rodada": 300,
         "estatisticas_ttl_dias": 30,
     },
+    "externos": {  # metadados do Deezer e do MusicBrainz (#88, coleta/externos.py; utilidade em aberto na #91)
+        "fontes": ["deezer", "musicbrainz"],
+        "por_rodada": 100,  # faixas por fonte em cada `sincronizar` (o MusicBrainz aceita 1 pedido/s)
+        "ttl_dias": 90,  # casamentos e dados (inclusive "sem casamento") são refeitos depois disso
+        "contato": "",  # URL ou e-mail no User-Agent, como o MusicBrainz pede; vazio = só o nome do programa
+    },
     "planos": {
         "limite_faixas": 200,  # acima disso, `plano aplicar` exige --grande além da confirmação
     },
@@ -46,6 +52,11 @@ PADRAO: dict = {
         # experimental (#84): não apagar o áudio analisado, para reanalisar sem baixar (modelo novo etc.)
         "guardar": False,
         "guardar_dir": "",  # vazio = ~/.local/share/yt-music-curator/audios
+    },
+    "analise": {
+        # análises extras (#88, audio/extras.py): cada uma com versão própria, sem reabrir a fila do núcleo.
+        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado (analisar --so-extras)
+        "extras": ["msd_tags", "yamnet", "maest"],
     },
     "provedores": {
         # "bandcamp" fica fora: a busca exige desafio JS (ver provedores/bandcamp.py); dá para pôr de volta no config

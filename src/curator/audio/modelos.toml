@@ -133,3 +133,19 @@ nome = "deeptemp-k16-3"
 pasta = "tempo/tempocnn"
 pb_sha256 = "21c328332a221695dd6e8572728c617373064df882e8f81da6d88dc3a821e3b3"
 json_sha256 = "c0c62a52aa4a05f197208133906775c1e87077a520cdec53598b67ea9d625998"
+
+# Análises extras (#88): cada grupo tem a própria versão e não entra no hash_modelos do núcleo. Acrescentar ou
+# trocar um modelo destes reanalisa só aquele grupo, a partir dos áudios guardados (#84/#90).
+[[modelo]]
+nome = "audioset-yamnet-1"
+pasta = "audio-event-recognition/yamnet"
+grupo = "yamnet"
+pb_sha256 = "604dbd73c8552c4762b2e652ef69a45a46218c42c5fb3c292b16fd7940c2ca7f"
+json_sha256 = "0c0499e4cedf01ba3012a1d0649e8fb9498106fb12fa74f0ea824d06f5e64f07"
+
+[[modelo]]
+nome = "discogs-maest-30s-pw-519l-2"
+pasta = "feature-extractors/maest"
+grupo = "maest"
+pb_sha256 = "92783feb21187443d058b4f16d7a76f47888d43fbdc7a28e8bcc8e024603bd20"
+json_sha256 = "83240aa553ffb491b0ec5a24565eb612553e5f38da5207403c25b890c5b34acd"

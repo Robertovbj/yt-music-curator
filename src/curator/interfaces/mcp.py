@@ -57,9 +57,11 @@ e NUNCA sugira mexer numa delas sem ele nomear qual. Por isso:
 Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1. Estilos, humores e instrumentos são saídas dos
 modelos (0..1, cada uma isolada; um estilo raramente passa de 0,5). genero_pai_min é outra régua: a afinidade
 RELATIVA ao núcleo do gênero na biblioteca (1,0 = tão típica quanto a faixa mediana do núcleo; 0,7 amplo, 0,8
-normal, 1,0 estrito), igual para todos os gêneros. Antes de fixar o limite, chame examinar_genero(pai, limite) e
-olhe as faixas logo acima e logo abaixo do corte: use o que você sabe dos artistas para subir ou descer o limite
-(é a receita que guarda o número, então o resultado continua reprodutível). Pedido "só com vocal"/"sem lo-fi":
+normal, 1,0 estrito), igual para todos os gêneros. O examinar_genero mostra também a afinidade_com_maest (a
+mesma régua com o MAEST, outra rede; ADR-15), que a receita NÃO usa: compare as duas na fronteira.
+Antes de fixar o limite, chame examinar_genero(pai, limite) e olhe as faixas logo acima e logo abaixo do corte:
+use o que você sabe dos artistas e as outras_visoes (MAEST, Rapping/Singing do YAMNet, gêneros do MusicBrainz e do
+Deezer) para subir ou descer o limite (é a receita que guarda o número, então o resultado continua reprodutível). Pedido "só com vocal"/"sem lo-fi":
 filtros.max.instrumental 0,5. Pop e Electronic quase não se separam pelo áudio (estes modelos chamam a produção
 pop de Electronic): para eles prefira perfil_alvo, sementes e estilos específicos a genero_pai_min.
 """
@@ -217,7 +219,8 @@ def descrever_vocabulario(
             for it in itens:
                 rel = afin.relativa(it["nome"], base)
                 reg = afin.reguas[it["nome"]]
-                it["regua"] = {"tipo": reg.tipo, "faixas_no_nucleo": reg.nucleo}
+                it["regua"] = {"tipo": reg.tipo, "faixas_no_nucleo": reg.nucleo,
+                               "com_maest": reg.referencia_maest is not None}  # fmt: skip
                 it["faixas_por_nivel"] = {n: int((rel >= t).sum()) for n, t in generos.NIVEIS.items()}
         itens.sort(key=lambda x: (-x["faixas_dominante"], x["nome"]))
         return {"grupo": grupo, "faixas_analisadas": len(d.ids), "itens": itens[:limite]}
@@ -242,7 +245,11 @@ def examinar_genero(
     faixas logo acima e logo abaixo de `limite` (afinidade relativa, 1,0 = típica do núcleo do gênero).
 
     Use o que você sabe dos artistas: se as de baixo são do gênero, desça o limite; se as de cima não são, suba.
-    `instrumental` alto (> 0,5) costuma ser lo-fi/trilha sem voz."""
+    `instrumental` alto (> 0,5) costuma ser lo-fi/trilha sem voz. `outras_visoes` (quando a faixa tem): `maest`, a
+    fração do gênero num modelo de outra rede; `rapping`/`singing` do YAMNet (só no Hip Hop); `generos_externos`,
+    os gêneros mais votados do artista (MusicBrainz) e do álbum (Deezer). `afinidade_com_maest`: a mesma régua com
+    o MAEST, que a receita não usa (separa melhor rap e Electronic, mas chama rock japonês de J-pop). Quando elas
+    discordam da afinidade, olhe a faixa com mais cuidado."""
     con = banco()
     afin = generos.Afinidades(con)
     if pai not in afin.pais:
@@ -258,23 +265,38 @@ def examinar_genero(
         ]
     else:
         ids = espacos.da_biblioteca(con)
-    rel = afin.relativa(pai, ids)
+    rel, rel_m = afin.relativa(pai, ids), afin.relativa_com_maest(pai, ids)
+    tem_m = (
+        afin.fracao_maest(ids)[1]
+        if afin.reguas[pai].referencia_maest is not None
+        else np.zeros(len(ids), bool)
+    )
     ordem = sorted(range(len(ids)), key=lambda i: (-rel[i], ids[i]))
     corte = sum(1 for i in ordem if rel[i] >= limite)
     esc = espacos.escalares(con)
     j = esc.colunas.index("instrumental") if "instrumental" in esc.colunas else None
     meta = _faixas(con, [ids[i] for i in ordem[max(0, corte - n) : corte + n]])
+    visoes = generos.OutrasVisoes(con)
 
     def item(i: int) -> dict:
         x = esc.X[esc.indice[ids[i]], j] if j is not None and ids[i] in esc.indice else float("nan")
-        return {**meta[ids[i]], "afinidade": round(float(rel[i]), 3),
-                "instrumental": None if np.isnan(x) else round(float(x), 2)}  # fmt: skip
+        out = {**meta[ids[i]], "afinidade": round(float(rel[i]), 3),
+               "instrumental": None if np.isnan(x) else round(float(x), 2)}  # fmt: skip
+        if tem_m[i]:
+            out["afinidade_com_maest"] = round(float(rel_m[i]), 3)
+        if v := visoes.da_faixa(ids[i], pai):
+            out["outras_visoes"] = v
+        return out
 
     reg = afin.reguas[pai]
     return {
         "pai": pai,
         "limite": limite,
-        "regua": {"tipo": reg.tipo, "faixas_no_nucleo": reg.nucleo},
+        "regua": {
+            "tipo": reg.tipo,
+            "faixas_no_nucleo": reg.nucleo,
+            "com_maest": reg.referencia_maest is not None,
+        },
         "faixas_por_limite": {str(t): int((rel >= t).sum()) for t in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2)},
         "acima": [item(i) for i in ordem[max(0, corte - n) : corte]],
         "abaixo": [item(i) for i in ordem[corte : corte + n]],

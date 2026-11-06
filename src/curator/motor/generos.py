@@ -11,6 +11,8 @@ Agora, por faixa e por pai:
 2. **fração do MTG-Jamendo**: a mesma conta na outra cabeça, pelos rótulos equivalentes (`MAPA_JAMENDO`; décadas
    fora). As duas cabeças usam o mesmo embedding EffNet, então concordam muito; a média ainda ganha um pouco.
 3. **afinidade** = média das frações disponíveis (só o Discogs, se o pai não tem equivalente no Jamendo).
+   Uma régua com o MAEST (#88, ADR-15) é calculada ao lado (`relativa_com_maest`) e mostrada à IA na fronteira,
+   mas não é a padrão: ela joga o rock japonês no Pop.
 4. **régua relativa**: afinidade ÷ mediana da afinidade no NÚCLEO do pai, que são as faixas da biblioteca que
    todas as cabeças põem nesse pai em 1º lugar. 1,0 = tão típica quanto a faixa mediana do núcleo. O mesmo
    limite (0,8) separou Hip Hop e Rock na avaliação (docs/avaliacao.md). Núcleo com menos de `MIN_NUCLEO` faixas:
@@ -23,6 +25,7 @@ sonora tocam vários gêneros).
 Pop e Electronic não se separam bem só pelo áudio: esses modelos chamam a produção pop moderna de Electronic.
 """
 
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -48,6 +51,77 @@ MAPA_JAMENDO = {
     "Stage & Screen": ["soundtrack"],
 }  # fmt: skip
 DECADAS = {"60s", "70s", "80s", "90s"}  # rótulos de época do Jamendo: não são gênero
+
+# Visões de outras redes e outros treinos (#88). O MAEST usa a taxonomia do Discogs ("Pai---Estilo") e não precisa
+# de mapa. "Rapping"/"Singing" do YAMNet são técnica vocal, não gênero: ficam fora deste mapa.
+MAPA_YAMNET = {
+    "Blues": ["Blues"],
+    "Classical": ["Classical music", "Opera"],
+    "Electronic": ["Electronic music", "House music", "Techno", "Dubstep", "Drum and bass", "Electronica",
+                   "Electronic dance music", "Ambient music", "Trance music"],
+    "Folk, World, & Country": ["Country", "Bluegrass", "Folk music", "Middle Eastern music", "Music of Africa",
+                               "Afrobeat", "Music of Asia", "Carnatic music", "Music of Bollywood", "Traditional music"],
+    "Funk / Soul": ["Rhythm and blues", "Soul music", "Funk", "Disco", "Gospel music"],
+    "Hip Hop": ["Hip hop music"],
+    "Jazz": ["Jazz", "Swing music"],
+    "Latin": ["Music of Latin America", "Salsa music", "Flamenco"],
+    "Pop": ["Pop music"],
+    "Reggae": ["Reggae", "Ska"],
+    "Rock": ["Rock music", "Heavy metal", "Punk rock", "Grunge", "Progressive rock", "Rock and roll", "Psychedelic rock"],
+    "Stage & Screen": ["Soundtrack music", "Theme music", "Video game music"],
+}  # fmt: skip
+# tags do MSD-MusiCNN (Last.fm) que são gênero; as outras (décadas, humor, "female vocalists") ficam de fora
+MAPA_MSD = {
+    "Blues": ["blues"],
+    "Electronic": ["electronic", "electronica", "electro", "House", "ambient", "dance", "chillout"],
+    "Folk, World, & Country": ["folk", "country"],
+    "Funk / Soul": ["soul", "funk", "rnb"],
+    "Hip Hop": ["Hip-Hop"],
+    "Jazz": ["jazz"],
+    "Pop": ["pop", "indie pop"],
+    "Rock": ["rock", "alternative", "indie", "alternative rock", "metal", "classic rock", "indie rock", "punk",
+             "hard rock", "heavy metal", "Progressive rock"],
+}  # fmt: skip
+
+# Rótulos livres dos metadados externos (gêneros do MusicBrainz e do Deezer) → pais do Discogs.
+# Primeiro os compostos que a palavra solta classificaria errado; depois palavras inteiras (um rótulo pode ter mais
+# de um pai, como "blues rock"). HEURÍSTICA conferida na avaliação da #88.
+_COMPOSTOS = {
+    "pop rap": ["Hip Hop"], "emo rap": ["Hip Hop"], "rap rock": ["Hip Hop", "Rock"], "rap metal": ["Hip Hop", "Rock"],
+    "trip hop": ["Electronic"], "rhythm and blues": ["Funk / Soul"], "r and b": ["Funk / Soul"],
+    "contemporary r and b": ["Funk / Soul"], "drum and bass": ["Electronic"], "synth pop": ["Electronic", "Pop"],
+    "synthpop": ["Electronic", "Pop"], "electropop": ["Electronic", "Pop"], "dance pop": ["Pop", "Electronic"],
+    "pop punk": ["Rock"], "pop rock": ["Rock", "Pop"], "nu metal": ["Rock"], "funk metal": ["Rock"],
+    "funk carioca": ["Latin"], "brazilian funk": ["Latin"], "baile funk": ["Latin"], "films games": ["Stage & Screen"],
+    "soul and funk": ["Funk / Soul"], "video game music": ["Stage & Screen"], "latin music": ["Latin"],
+    "brazilian music": ["Latin"], "bossa nova": ["Latin", "Jazz"],
+}  # fmt: skip
+_PALAVRAS = {
+    "Hip Hop": r"hip hop|hiphop|rap|trap|drill|grime|boom bap|phonk|horrorcore|crunk|g funk|gangsta",
+    "Rock": r"rock|metal|punk|grunge|hardcore|emo|screamo|shoegaze|metalcore|deathcore|djent|alternative|post hardcore",
+    "Electronic": r"electronic|electronica|edm|house|techno|trance|dubstep|electro|synthwave|idm|ambient|breakbeat|"
+    r"future bass|eurodance|hardstyle|chiptune|vaporwave|downtempo|dance|dubstep|jungle",
+    "Pop": r"pop|j pop|k pop|c pop|teen pop|indie pop|power pop",
+    "Funk / Soul": r"soul|funk|disco|motown|r b|rnb|new jack swing|gospel",
+    "Jazz": r"jazz|swing|bebop|big band",
+    "Latin": r"latin|reggaeton|salsa|bachata|cumbia|merengue|tango|mpb|samba|sertanejo|forro|axe|pagode",
+    "Reggae": r"reggae|dancehall|dub|ska|rocksteady",
+    "Folk, World, & Country": r"folk|country|bluegrass|celtic|americana|world",
+    "Blues": r"blues",
+    "Classical": r"classical|orchestral|baroque|opera|choral|symphonic|chamber music|contemporary classical",
+    "Stage & Screen": r"soundtrack|score|video game|anime|musical|show tunes|film|theatre",
+}
+
+
+def pais_de_rotulo(rotulo: str) -> list[str]:
+    """Pais do Discogs para um rótulo externo ("hip-hop" → Hip Hop, "blues rock" → Blues e Rock; "seen live" → [])."""
+    limpo = " ".join(re.sub(r"[^\w]+", " ", rotulo.casefold().replace("&", " and ")).split())
+    if limpo in _COMPOSTOS:
+        return list(_COMPOSTOS[limpo])
+    return [p for p, rx in _REGEX_PALAVRAS.items() if rx.search(limpo)]
+
+
+_REGEX_PALAVRAS = {p: re.compile(rf"\b(?:{rx})\b") for p, rx in _PALAVRAS.items()}
 MIN_NUCLEO = 10
 NIVEIS = {"amplo": 0.7, "normal": 0.8, "estrito": 1.0}
 
@@ -58,6 +132,7 @@ class Regua:
     referencia: float  # a afinidade que vale 1,0
     tipo: str  # "nucleo" | "nucleo_amplo" | "global"
     nucleo: int  # faixas do núcleo usado (0 na global)
+    referencia_maest: float | None = None  # a fração do MAEST que vale 1,0 (#88); None = sem a visão do MAEST
 
 
 class Afinidades:
@@ -81,10 +156,18 @@ class Afinidades:
                         self._mj[col_j[r], self.pais.index(p)] = 1
         self._com_jamendo = self._mj.any(axis=0)
         self._genero_j = np.array([c not in DECADAS for c in self.j.colunas], bool)
+        # MAEST (#88, ADR-15): mesma taxonomia do Discogs ("Pai---Estilo"), outra rede e outro treino
+        self.m = espacos.probabilidades(con, "maest519")
+        self._mm = np.zeros((len(self.m.colunas), len(self.pais)), np.float64)
+        for i, c in enumerate(self.m.colunas):
+            if "---" in c and (pai := c.split("---")[0]) in self.pais:
+                self._mm[i, self.pais.index(pai)] = 1
         base = [v for v in espacos.da_biblioteca(con) if v in self.d.indice]
         fd, fj, tem_j = self._fracoes(base)
         afin = self._fundir(fd, fj, tem_j)
+        self._mascaras: dict[str, np.ndarray] = {}
         self.reguas = self._medir_reguas(afin, fd, fj, tem_j)
+        self._medir_reguas_maest(base)
 
     # ------------------------------------------------------------------ cálculo
 
@@ -124,6 +207,7 @@ class Afinidades:
             for nome, mascara in (("nucleo", todas), ("nucleo_amplo", qualquer)):
                 if mascara.sum() >= MIN_NUCLEO:
                     medidas[p] = (float(np.median(afin[mascara, k])), nome, int(mascara.sum()))
+                    self._mascaras[p] = mascara
                     break
         nucleos = [m for m, tipo, _ in medidas.values() if tipo == "nucleo"]
         # sem núcleo nenhum (biblioteca pequena demais): a afinidade típica do gênero dominante de cada faixa
@@ -132,15 +216,93 @@ class Afinidades:
             p: Regua(p, *medidas[p]) if p in medidas else Regua(p, global_, "global", 0) for p in self.pais
         }
 
+    def fracao_maest(self, ids: list[str]) -> tuple[np.ndarray, np.ndarray]:
+        """(fração do MAEST por pai, tem MAEST), linhas alinhadas a `ids`."""
+        fm, tem = np.zeros((len(ids), len(self.pais))), np.zeros(len(ids), bool)
+        li = [k for k, v in enumerate(ids) if v in self.m.indice]
+        if li and self._mm.any():
+            X = self.m.X[[self.m.indice[ids[k]] for k in li]].astype(np.float64)
+            fm[li] = (X @ self._mm) / np.maximum(X.sum(axis=1, keepdims=True), 1e-12)
+            tem[li] = True
+        return fm, tem
+
+    def _medir_reguas_maest(self, base: list[str]) -> None:
+        """A régua do MAEST de cada pai: a mediana da fração dele no MESMO núcleo da régua principal.
+
+        Só quando há pelo menos `MIN_NUCLEO` faixas do núcleo com MAEST; senão o pai fica só com a régua principal
+        (biblioteca ainda sem os extras, ou pai na referência global)."""
+        fm, tem = self.fracao_maest(base)
+        for k, p in enumerate(self.pais):
+            mascara = self._mascaras.get(p)
+            if mascara is None or (mascara & tem).sum() < MIN_NUCLEO:
+                continue
+            ref = float(np.median(fm[mascara & tem, k]))
+            if ref > 0:
+                r = self.reguas[p]
+                self.reguas[p] = Regua(r.pai, r.referencia, r.tipo, r.nucleo, ref)
+
     # ------------------------------------------------------------------ consulta
 
     def afinidade(self, ids: list[str]) -> np.ndarray:
-        """Matriz (faixas × pais) da afinidade bruta, na ordem de `self.pais`."""
+        """Matriz (faixas × pais) da afinidade bruta do Discogs + Jamendo, na ordem de `self.pais`."""
         return self._fundir(*self._fracoes(ids))
 
     def relativa(self, pai: str, ids: list[str]) -> np.ndarray:
-        """Afinidade de `pai` na régua do gênero (1,0 = típica do núcleo). Pai que não existe: zeros."""
+        """Afinidade de `pai` na régua do gênero (1,0 = típica do núcleo). Pai que não existe: zeros.
+
+        É a régua das receitas (`genero_pai_min`). A com o MAEST fica em `relativa_com_maest`."""
         if pai not in self.pais:
             return np.zeros(len(ids), np.float64)
-        k = self.pais.index(pai)
-        return self.afinidade(ids)[:, k] / self.reguas[pai].referencia
+        return self.afinidade(ids)[:, self.pais.index(pai)] / self.reguas[pai].referencia
+
+    def relativa_com_maest(self, pai: str, ids: list[str]) -> np.ndarray:
+        """A mesma régua com o MAEST (#88, ADR-15): média da régua do Discogs + Jamendo com a da fração do MAEST,
+        cada uma relativa ao próprio núcleo. Faixa sem MAEST (ou pai sem régua do MAEST) fica com `relativa`.
+
+        Só aparece para a IA na fronteira, não entra na receita: separa melhor o rap e o Electronic, mas o MAEST
+        chama boa parte do rock japonês de "J-pop" (no 0,8, o Rock do gabarito cai de 84% para 72% de revocação).
+        A decisão fica para o gênero aprendido com os rótulos do usuário (#93)."""
+        base = self.relativa(pai, ids)
+        reg = self.reguas.get(pai)
+        if reg is None or reg.referencia_maest is None:
+            return base
+        fm, tem = self.fracao_maest(ids)
+        return np.where(tem, (base + fm[:, self.pais.index(pai)] / reg.referencia_maest) / 2, base)
+
+
+class OutrasVisoes:
+    """O que os sinais de fora da afinidade dizem de uma faixa (#88), para a IA conferir a fronteira de um gênero.
+
+    - `maest`: fração dos estilos do pai no MAEST (mesma taxonomia do Discogs, outra rede);
+    - `rapping`/`singing`: classes do YAMNet no percentil 90 dos quadros (só no Hip Hop): técnica vocal, não gênero;
+    - `generos_externos`: os rótulos mais votados do artista no MusicBrainz e os do álbum no Deezer.
+    Faixa sem o dado: a chave não aparece."""
+
+    def __init__(self, con: sqlite3.Connection):
+        self.con = con
+        self.maest = espacos.probabilidades(con, "maest519")
+        self.yam = espacos.probabilidades(con, "yamnet_p90")
+
+    def da_faixa(self, vid: str, pai: str) -> dict:
+        out: dict = {}
+        if vid in self.maest.indice:
+            x = self.maest.linha(vid).astype(np.float64)
+            cols = [i for i, c in enumerate(self.maest.colunas) if c.startswith(pai + "---")]
+            out["maest"] = round(float(x[cols].sum() / max(x.sum(), 1e-12)), 3)
+        if pai == "Hip Hop" and vid in self.yam.indice:
+            y = self.yam.linha(vid)
+            for nome, col in (("rapping", "Rapping"), ("singing", "Singing")):
+                if col in self.yam.colunas:
+                    out[nome] = round(float(y[self.yam.colunas.index(col)]), 3)
+        ext = [
+            r[0]
+            for r in self.con.execute(
+                """SELECT rotulo FROM externos_generos WHERE video_id = ?
+                     AND ((fonte = 'musicbrainz' AND nivel = 'artista') OR (fonte = 'deezer' AND nivel = 'album'))
+                   ORDER BY fonte = 'deezer', peso DESC, rotulo LIMIT 4""",
+                (vid,),
+            )
+        ]
+        if ext:
+            out["generos_externos"] = ext
+        return out

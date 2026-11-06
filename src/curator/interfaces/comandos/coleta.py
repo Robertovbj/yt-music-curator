@@ -23,8 +23,11 @@ def sincronizar(
     sem_estatisticas: bool = typer.Option(
         False, "--sem-estatisticas", help="Pula visualizações e data de publicação (uma chamada por faixa)."
     ),
+    sem_externos: bool = typer.Option(
+        False, "--sem-externos", help="Pula os metadados do Deezer e do MusicBrainz (#88)."
+    ),
 ) -> None:
-    """Curtidas, playlists próprias, pertencimento, metadados de álbum e estatísticas das faixas."""
+    """Curtidas, playlists próprias, pertencimento, metadados de álbum, estatísticas e metadados externos."""
     from curator.coleta.sincronizar import (
         completar_estatisticas,
         completar_metadados,
@@ -57,6 +60,13 @@ def sincronizar(
             completar_estatisticas(
                 con, cli, meta["estatisticas_por_rodada"], meta["estatisticas_ttl_dias"], forcar=forcar
             ),
+        )
+    if not sem_externos and (e := cfg["externos"])["por_rodada"]:
+        from curator.coleta import externos
+
+        c = externos.coletar(con, cfg, externos.clientes(cfg), e["fontes"], limite=e["por_rodada"])
+        typer.echo(
+            "metadados externos: " + (", ".join(f"{k} {v}" for k, v in sorted(c.items())) or "nada a fazer")
         )
     if not sem_fila:
         from curator.interfaces.comandos.analise import enfileirar
