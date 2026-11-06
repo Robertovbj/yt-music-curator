@@ -23,7 +23,9 @@ def trava_worker(arquivo: Path):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             dono = os.pread(fd, 32, 0).decode(errors="replace").strip() or "?"
-            raise OutroWorkerRodando(f"outro `curator analisar` já está rodando (pid {dono})") from None
+            raise OutroWorkerRodando(
+                f"outro worker (`curator analisar` ou `audios baixar`) já está rodando (pid {dono})"
+            ) from None
         os.ftruncate(fd, 0)
         os.pwrite(fd, str(os.getpid()).encode(), 0)
         yield

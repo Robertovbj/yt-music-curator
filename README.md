@@ -92,7 +92,10 @@ guardar_dir = ""   # vazio = ~/.local/share/yt-music-curator/audios
 uv run curator analisar --guardar-audio   # liga só nesta execução
 uv run curator audios status              # quantos e quanto espaço
 uv run curator audios limpar              # apaga todos (as análises ficam)
+uv run curator audios baixar --aguardar   # só baixa e guarda o que falta, sem analisar
 ```
+
+O `audios baixar` adianta o download para uma reanálise: baixa a mesma fonte da análise atual de cada faixa, com as saídas, cotas e pausas do worker, e não analisa nada. Ele usa a mesma trava do `analisar`, então o timer espera ele terminar. `--primeiro arquivo.txt` (um video_id por linha) põe algumas faixas na frente.
 
 **Várias saídas em paralelo.** Cada `[[proxy]]` do config vira uma linha de download própria, com a sua cota e o seu ritmo; a análise continua uma faixa por vez. `contrib/saidas/compose.yml` traz duas saídas prontas: uma VPN OpenVPN e um celular via Tailscale (exit node, nos dados móveis), cada uma como SOCKS5 em `127.0.0.1`:
 
