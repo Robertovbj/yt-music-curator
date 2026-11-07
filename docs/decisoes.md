@@ -682,7 +682,16 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
    - sem os extras, 47 MB;
    - a exportação leva ~3 s, e a importação num banco vazio ~1 s.
 
+10. **Onde fica o pacote (#97, decidido em 07/11): numa Release do GitHub.**
+    - Quem exporta cria uma Release `analises-AAAA-MM-DD` com o zip anexado.
+    - Os amigos, que já precisam do repositório para instalar, baixam o mais recente com `gh release download`.
+    - O asset fica fora do histórico do git, aceita até 2 GB por arquivo e tem a data na tag.
+    - Ele é visível para quem tem acesso ao repositório: a lista de faixas também.
+
 **Alternativas rejeitadas:**
+- **Commitar o pacote no repositório:** cada atualização soma dezenas de MB ao histórico para sempre, e o pacote da biblioteca (86 MB) logo passa do limite de 100 MB por arquivo do GitHub.
+- **Git LFS:** tem cota gratuita limitada e exige o git-lfs em cada máquina.
+- **Mandar o arquivo direto:** é mais privado, mas fica sem versão. Continua possível.
 - **Mandar o backup (#50):** leva o banco inteiro, com curtidas, playlists e receitas.
 - **Exportar em JSON:** os vetores em float32 ficariam ~4× maiores e mais lentos de conferir.
 - **Uma API ou servidor compartilhado:** é infraestrutura demais para um grupo de amigos.

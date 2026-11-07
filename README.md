@@ -262,6 +262,15 @@ uv run curator analises remover 1                      # desfaz uma importação
   - as faixas importadas continuam **novas**: não viram curtida nem entram na sua biblioteca;
   - a análise local sempre vence;
   - só entra o que foi feito com a mesma versão do analisador (os dois lados precisam de `uv run curator modelos baixar` com o mesmo código).
-- **Tamanho:** o pacote da biblioteca toda tem ~86 MB. Não ponha no repositório.
+- **Tamanho:** o pacote da biblioteca toda tem ~86 MB. Não ponha no repositório: ele vai numa Release (#97).
+
+```sh
+# quem exporta: uma Release por pacote, com a data na tag
+gh release create analises-AAAA-MM-DD ~/.local/share/yt-music-curator/exportacoes/curator-analises-AAAA-MM-DD.zip \
+  --title "Análises de AAAA-MM-DD" --notes "Pacote de análises (curator analises importar)."
+# quem importa: baixa o mais recente e importa
+gh release download --pattern 'curator-analises-*.zip' --dir /tmp/analises
+uv run curator analises importar /tmp/analises/curator-analises-*.zip
+```
 
 Detalhes no ADR-16.
