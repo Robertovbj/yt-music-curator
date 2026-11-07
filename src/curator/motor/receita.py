@@ -13,9 +13,14 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from curator.motor.espacos import ESCALARES, TIPOS_PROBABILIDADE
+from curator.motor.popularidade import TIPOS_VIDEO
 from curator.texto import normalizar
 
 Unidade = Annotated[float, Field(ge=0, le=1)]
+TipoVideo = Literal[tuple(TIPOS_VIDEO)]
+# fora das features do áudio: percentil das visualizações na biblioteca (#87; motor/popularidade.py)
+POPULARIDADE = "popularidade"
+FEATURES_RECEITA = (*ESCALARES, POPULARIDADE)
 
 
 class Alvo(BaseModel):
@@ -33,6 +38,9 @@ class Filtros(BaseModel):
     somente_playlists: list[str] = []
     bpm: tuple[float, float] | None = None
     duracao_s: tuple[int, int] | None = None
+    # só estes tipos de vídeo (#87): "faixa" = só as faixas de áudio, sem clipes nem vídeos de usuário.
+    # Faixa sem a informação fica.
+    tipos_video: list[TipoVideo] = []
     min: dict[str, float] = {}
     max: dict[str, float] = {}
     generos_min: dict[str, Unidade] = {}  # passa se QUALQUER rótulo listado tiver prob ≥ valor
@@ -102,7 +110,7 @@ def vocabulario(con: sqlite3.Connection) -> dict[str, list[str]]:
         )
     ]
     return {
-        "features": list(ESCALARES),
+        "features": list(FEATURES_RECEITA),
         "rotulos": rotulos,
         "generos_pai": sorted({r.split("---")[0] for r in rotulos if "---" in r}),
         "artistas": [r[0] for r in con.execute("SELECT DISTINCT nome FROM artistas ORDER BY nome")],
@@ -166,10 +174,10 @@ def validar(con: sqlite3.Connection, r: Receita) -> None:
         ("filtros.max", r.filtros.max),
     ):
         for f in chaves:
-            if f not in ESCALARES:
-                erros.append(f"{campo}: feature '{f}' não existe{_sugerir(f, list(ESCALARES))}")
+            if f not in FEATURES_RECEITA:
+                erros.append(f"{campo}: feature '{f}' não existe{_sugerir(f, list(FEATURES_RECEITA))}")
     for f, alvo in r.perfil_alvo.items():
-        if f != "bpm" and f in ESCALARES and not 0 <= alvo.alvo <= 1:
+        if f != "bpm" and f in FEATURES_RECEITA and not 0 <= alvo.alvo <= 1:
             erros.append(f"perfil_alvo.{f}: alvo {alvo.alvo} fora de 0..1")
     for campo, chaves in (
         ("filtros.generos_min", r.filtros.generos_min),

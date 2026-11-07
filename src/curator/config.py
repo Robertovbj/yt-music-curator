@@ -55,7 +55,7 @@ PADRAO: dict = {
     },
     "analise": {
         # análises extras (#88, audio/extras.py): cada uma com versão própria, sem reabrir a fila do núcleo.
-        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado (analisar --so-extras)
+        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado. [] desliga (#92)
         "extras": ["msd_tags", "yamnet", "maest"],
     },
     "provedores": {
@@ -75,6 +75,9 @@ PADRAO: dict = {
         "max_repeticoes": 3,  # depois disso, fora por `pausa_dias`
         "pausa_dias": 30,
         "analisar_top": 60,  # modo lento: quantas das melhores candidatas baixar e analisar
+        # com popularidade ou publicadas_desde no pedido (#87): quantas das melhores candidatas recebem as
+        # visualizações e a data de publicação antes do ranking (uma chamada por faixa, guardada com validade)
+        "estatisticas_top": 100,
         "deezer_artistas": 3,  # artistas relacionados por artista-semente
         "deezer_faixas_por_artista": 3,
         # dislike fora das playlists (#60): cada faixa recomendada é conferida no botão de like do player

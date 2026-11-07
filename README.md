@@ -112,12 +112,7 @@ docker compose --env-file ~/.config/yt-music-curator/saidas.env up -d --build   
 docker compose --env-file ~/.config/yt-music-curator/saidas.env --profile celular up -d        # + celular
 ```
 
-**Análises extras.** Além do núcleo (EffNet e cabeças, MusiCNN, tempo e tom), o analisador guarda três visões de outras redes e outros treinos, cada uma com versão própria (`[analise] extras`): as 50 tags do MSD-MusiCNN, as 521 classes do YAMNet (AudioSet, com "Rapping" e "Singing") e os 519 estilos do MAEST. Faixas novas recebem os extras na mesma passada. Nas já analisadas, eles rodam sobre os áudios guardados, sem rede e sem reabrir a fila: ~16 s por faixa, quase tudo do MAEST. Um extra novo ou trocado refaz só ele.
-
-```sh
-uv run curator analisar --so-extras   # só os extras que faltam (provisória: sai quando a biblioteca tiver os extras, #92)
-uv run curator analisar --sem-extras  # pula os extras nesta execução
-```
+**Análises extras.** Além do núcleo (EffNet e cabeças, MusiCNN, tempo e tom), o analisador guarda três visões de outras redes e outros treinos, cada uma com versão própria (`[analise] extras`): as 50 tags do MSD-MusiCNN, as 521 classes do YAMNet (AudioSet, com "Rapping" e "Singing") e os 519 estilos do MAEST. Faixas novas recebem os extras na mesma passada. Nas já analisadas, eles rodam sobre os áudios guardados, sem rede e sem reabrir a fila: ~16 s por faixa, quase tudo do MAEST. Um extra novo ou trocado refaz só ele: o `curator analisar` completa os que faltam depois da fila, a partir do áudio guardado. Para não calcular extras, `[analise] extras = []` no config.
 
 ### Receitas, classificação e planos
 
@@ -146,6 +141,24 @@ uv run curator plano mostrar                            # o diff, agrupado por p
 Nomes de artistas, gêneros, features e playlists são conferidos com o banco; um nome errado é recusado com sugestão (`quis dizer: Banda Rock?`). Nada é aplicado no YouTube Music ainda: os planos ficam guardados para o M7.
 
 O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, igual para todos os gêneros. 1,0 é tão típico do gênero quanto a faixa mediana do núcleo dele na sua biblioteca, o conjunto de faixas que os dois modelos põem nesse gênero em primeiro lugar. O `examinar_genero` mostra também a mesma régua com o MAEST, que separa melhor rap e Electronic mas joga rock japonês no Pop. Por isso ela fica ao lado e não entra na receita (ADR-15, #93). Os níveis são 0,7 amplo, 0,8 normal e 1,0 estrito. Pelo MCP, `examinar_genero` mostra as faixas logo acima e logo abaixo do corte. Pop e Electronic quase não se separam pelo áudio. A decisão está no ADR-14, e a medição em `docs/avaliacao.md`.
+
+**Gênero aprendido com os seus rótulos (#93).** As réguas acima usam a taxonomia do Discogs, que não sabe o que você chama de cada gênero. No Discogs, J-pop é etiqueta de mercado: kessoku band cai no Pop. Você pode ensinar o modelo:
+
+```sh
+uv run curator generos importar-gabarito gabarito.toml   # um gabarito pessoal: artistas e faixas por gênero
+uv run curator generos rotular Rock                       # pergunta as faixas mais duvidosas, uma a uma
+uv run curator generos rotulo VIDEO_ID Rock nao           # uma faixa só (sim, nao ou apagar)
+uv run curator generos status --validar                   # rótulos por gênero e a precisão, deixando o artista de fora
+```
+
+- **Pelo MCP:** a IA mostra as faixas mais duvidosas (`faixas_para_rotular`) e grava a SUA resposta (`rotular_genero`).
+- **Origem:** os rótulos nunca vêm das playlists.
+- **Onde aparece:** a afinidade aprendida aparece ao lado no `examinar_genero`. As receitas seguem a régua do Discogs até os rótulos cobrirem o pop japonês e as trilhas (ADR-17).
+
+Popularidade e tipo do vídeo (#87) vêm do `sincronizar`:
+- **`popularidade`:** o percentil das visualizações de todo o YouTube na sua biblioteca, em escala log, de 0 (lado B) a 1 (as mais vistas). Vale em `perfil_alvo` e em `filtros.min`/`max`, como uma feature.
+- **`filtros.tipos_video`:** `["faixa"]` deixa só as faixas de áudio, sem clipes (`clipe`) nem vídeos de usuário (`usuario`). A faixa sem essa informação fica.
+- **Nas recomendações:** `--popularidade 0..1` e `--desde AAAA-MM-DD` (só lançamentos). Antes de ordenar, as melhores candidatas recebem as visualizações e a data.
 
 ## Desenvolvimento
 
@@ -230,3 +243,34 @@ uv run curator backup restaurar arquivo.zip       # na máquina nova; com dados 
 ```
 
 O zip leva o banco (análises, vetores, receitas, planos, clusters), o `config.toml` e o `hierarquia.toml`. Os modelos Essentia ficam de fora: na máquina nova, `uv run curator modelos baixar`.
+
+### Compartilhar análises com outras pessoas
+
+Analisar uma biblioteca leva dias. Quem já analisou pode passar as análises adiante:
+
+```sh
+uv run curator analises exportar --autor "Seu nome"   # pacote em ~/.local/share/yt-music-curator/exportacoes/
+uv run curator analises importar pacote.zip --seco     # confere e conta, sem gravar
+uv run curator analises importar pacote.zip
+uv run curator analises importadas                     # o que entrou de quem
+uv run curator analises remover 1                      # desfaz uma importação
+```
+
+- **O que vai:** os metadados públicos das faixas, as análises, os extras e os metadados externos.
+- **O que nunca vai:** curtidas, likes e dislikes, playlists, receitas, recomendações, proxies, o áudio e caminhos do seu disco.
+- **Para quem importa:**
+  - as faixas importadas continuam **novas**: não viram curtida nem entram na sua biblioteca;
+  - a análise local sempre vence;
+  - só entra o que foi feito com a mesma versão do analisador (os dois lados precisam de `uv run curator modelos baixar` com o mesmo código).
+- **Tamanho:** o pacote da biblioteca toda tem ~86 MB. Não ponha no repositório: ele vai numa Release (#97).
+
+```sh
+# quem exporta: uma Release por pacote, com a data na tag
+gh release create analises-AAAA-MM-DD ~/.local/share/yt-music-curator/exportacoes/curator-analises-AAAA-MM-DD.zip \
+  --title "Análises de AAAA-MM-DD" --notes "Pacote de análises (curator analises importar)."
+# quem importa: baixa o mais recente e importa
+gh release download --pattern 'curator-analises-*.zip' --dir /tmp/analises
+uv run curator analises importar /tmp/analises/curator-analises-*.zip
+```
+
+Detalhes no ADR-16.

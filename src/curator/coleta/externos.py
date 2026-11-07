@@ -359,7 +359,8 @@ def falhar(con, vid: str, fonte: str, erro: str, agora_dt: datetime) -> None:
         """INSERT INTO externos_faixas (video_id, fonte, status, erro, tentativas, proxima_em, buscado_em)
            VALUES (?, ?, 'erro', ?, ?, ?, ?)
            ON CONFLICT (video_id, fonte) DO UPDATE SET status = 'erro', erro = excluded.erro,
-             tentativas = excluded.tentativas, proxima_em = excluded.proxima_em, buscado_em = excluded.buscado_em""",
+             tentativas = excluded.tentativas, proxima_em = excluded.proxima_em, buscado_em = excluded.buscado_em,
+             importacao_id = NULL""",  # refeita aqui: deixa de ser da importação (#96)
         (vid, fonte, erro[:500], n, proxima.strftime("%Y-%m-%dT%H:%M:%SZ"), agora()),
     )
 

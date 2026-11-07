@@ -10,6 +10,8 @@
 
 `VERSAO_MOTOR` muda quando o significado de um campo da receita muda; a execução guarda a versão (ADR-05).
 v2 (#83): `genero_pai_min` passou a ser a afinidade relativa ao núcleo do gênero (ADR-14), não o maior estilo.
+Com `generos.REGUA_RECEITAS = "aprendida"` (#93, ADR-17; hoje "v2"), `genero_pai_min` usaria a régua aprendida com os
+rótulos do usuário. Isso pede um `VERSAO_MOTOR` novo, e a versão do banco da execução já leva o hash dos rótulos.
 """
 
 import json
@@ -21,8 +23,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from curator.banco import consultas
-from curator.motor import espacos, generos
-from curator.motor.receita import Receita, resolver_playlist, validar
+from curator.motor import espacos, generos, popularidade
+from curator.motor.receita import POPULARIDADE, Receita, resolver_playlist, validar
 from curator.texto import normalizar
 
 VERSAO_MOTOR = "2"
@@ -112,6 +114,7 @@ class _Probs:
         self.indice = _indice_rotulos(con)
         self.matrizes = {t: espacos.probabilidades(con, t) for t in espacos.TIPOS_PROBABILIDADE}
         self._afinidades: generos.Afinidades | None = None
+        self.versao_rotulos: str | None = None  # hash dos rótulos, quando a régua aprendida entrou
 
     def de(self, rotulo: str) -> np.ndarray:
         out = np.zeros(len(self.ids), np.float32)
@@ -122,10 +125,12 @@ class _Probs:
         return out
 
     def do_pai(self, pai: str) -> np.ndarray:
-        """Afinidade relativa (#83): 1,0 = tão típica do gênero quanto a faixa mediana do núcleo dele."""
+        """Afinidade relativa (#83, #93): 1,0 = tão típica do gênero quanto a faixa mediana do núcleo dele."""
         if self._afinidades is None:
             self._afinidades = generos.Afinidades(self.con)
-        return self._afinidades.relativa(pai, self.ids).astype(np.float32)
+        if self._afinidades.usa_aprendida(pai):
+            self.versao_rotulos = self._afinidades.aprendido.versao
+        return self._afinidades.relativa_receita(pai, self.ids).astype(np.float32)
 
 
 def _menciona(texto_norm: str, nome_norm: str) -> bool:
@@ -162,6 +167,12 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     col = {c: i for i, c in enumerate(esc.colunas)}
     probs = _Probs(con, cand)
     f = r.filtros
+    usa_pop = POPULARIDADE in {*f.min, *f.max, *r.perfil_alvo}
+    # percentil das visualizações na biblioteca (#87): NaN sem o dado, como uma feature ausente
+    pop = popularidade.percentis(con, cand) if usa_pop else None
+
+    def coluna(nome: str) -> np.ndarray:
+        return pop if nome == POPULARIDADE else esc.X[:, col[nome]]
 
     # 2. filtros duros
     manter = np.ones(len(cand), bool)
@@ -197,6 +208,9 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
             "duração",
             np.array([meta[v]["duracao_s"] is not None and lo <= meta[v]["duracao_s"] <= hi for v in cand]),
         )
+    if f.tipos_video:
+        aceitos, tipo = set(f.tipos_video), popularidade.tipos(con, cand)
+        aplicar("tipo de vídeo", np.array([tipo[v] is None or tipo[v] in aceitos for v in cand]))
     limites = dict(f.min)
     tetos = dict(f.max)
     if f.bpm:
@@ -205,10 +219,10 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
             min(tetos.get("bpm", np.inf), f.bpm[1]),
         )
     for nome, lo in limites.items():
-        x = esc.X[:, col[nome]]
+        x = coluna(nome)
         aplicar(f"{nome} < {lo}", ~np.isnan(x) & (x >= lo))
     for nome, hi in tetos.items():
-        x = esc.X[:, col[nome]]
+        x = coluna(nome)
         aplicar(f"{nome} > {hi}", ~np.isnan(x) & (x <= hi))
     if f.generos_min:
         ok = np.zeros(len(cand), bool)
@@ -233,11 +247,9 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     if r.perfil_alvo:
         soma_w, d2 = 0.0, np.zeros(len(idx))
         for nome, alvo in r.perfil_alvo.items():
-            j = col[nome]
-            x = esc.X[idx, j]
-            dz = np.where(
-                np.isnan(x), 1.0, (x - alvo.alvo) / desvio[j]
-            )  # feature ausente: 1 desvio de penalidade
+            x = coluna(nome)[idx]
+            d = popularidade.DESVIO if nome == POPULARIDADE else desvio[col[nome]]
+            dz = np.where(np.isnan(x), 1.0, (x - alvo.alvo) / d)  # feature ausente: 1 desvio de penalidade
             d2 += alvo.peso * dz**2
             soma_w += alvo.peso
         comps["perfil"], pesos["perfil"] = np.exp(-d2 / (2 * soma_w)), r.pesos.perfil
@@ -303,4 +315,6 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
         Item(ids[i], round(float(score[i]), 6), {k: round(float(v[i]), 6) for k, v in comps.items()})
         for i in escolhidos
     ]
+    if probs.versao_rotulos:
+        ex.versao_banco = f"{ex.versao_banco}+rotulos:{probs.versao_rotulos}"
     return ex

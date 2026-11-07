@@ -45,19 +45,12 @@ def analisar(
         "--guardar-audio",
         help="Experimental: guarda o áudio analisado para reanalisar sem baixar (o mesmo que [audio] guardar).",
     ),
-    # TODO(#92): remover o --so-extras (e rever o --sem-extras) quando a biblioteca inteira tiver os extras. Ele só
-    # existe para passar os extras nas faixas analisadas antes da #88; as análises novas já os rodam na mesma passada.
-    so_extras: bool = typer.Option(
-        False,
-        "--so-extras",
-        help="Só as análises extras (#88) que faltam, a partir dos áudios guardados (sem rede). Provisória (#92).",
-    ),
-    sem_extras: bool = typer.Option(False, "--sem-extras", help="Não calcula as análises extras (#88)."),
 ) -> None:
     """Consome a fila (baixa, analisa, grava e apaga ou guarda o áudio) e depois completa as análises extras.
 
-    Os extras ([analise] extras: tags do MSD-MusiCNN, YAMNet, MAEST) vêm na mesma passada para as faixas novas; nas
-    já analisadas, rodam sobre os áudios guardados (#84/#90), sem rede e sem reabrir a fila."""
+    Os extras ([analise] extras: tags do MSD-MusiCNN, YAMNet, MAEST) vêm na mesma passada para as faixas novas. Nas
+    já analisadas (um extra novo, ou uma versão nova dele), rodam sobre os áudios guardados (#84/#90), sem rede e sem
+    reabrir a fila. Para não calcular extras, `[analise] extras = []` no config (#92)."""
     try:
         from curator.audio.analisador import Analisador
     except ImportError:
@@ -70,21 +63,10 @@ def analisar(
     instalar_sinais(comp)
     try:
         with trava_worker(caminhos().dados_dir / "worker.lock"):
-            nomes = [] if sem_extras else _extras_com_modelos(cfg["analise"]["extras"])
-            if so_extras:  # só os modelos dos extras: o núcleo (~2 GB) nem carrega
-                from curator.audio.extras import AnalisadorExtras
-
-                extras_an = (
-                    AnalisadorExtras(caminhos().modelos_dir, nomes, verificar_checksums=False)
-                    if nomes
-                    else None
-                )
-            else:
-                analisador = _carregar_analisador(Analisador, nomes)
-                _relatar(_rodar_worker(analisador, cfg, comp, limite, ate, aguardar, guardar_audio))
-                extras_an = analisador.extras
-            if extras_an is not None and not comp.evento_parar.is_set():
-                _complementar(extras_an, comp, limite, ate)
+            analisador = _carregar_analisador(Analisador, _extras_com_modelos(cfg["analise"]["extras"]))
+            _relatar(_rodar_worker(analisador, cfg, comp, limite, ate, aguardar, guardar_audio))
+            if analisador.extras is not None and not comp.evento_parar.is_set():
+                _complementar(analisador.extras, comp, limite, ate)
     except OutroWorkerRodando as e:
         typer.echo(f"{e}; nada a fazer.")  # código 0: o timer não registra falha
         return
@@ -210,7 +192,7 @@ def status() -> None:
         ]
         typer.echo(
             f"análises extras: {', '.join(partes)} · {len(extras.pendentes(con, hashes))} faixa(s) com áudio "
-            "guardado esperando (`curator analisar --so-extras`)"
+            "guardado esperando (o `curator analisar` completa)"
         )
     a_fazer = r["por_status"].get("pendente", 0) + r["por_status"].get("erro", 0) - r["esgotados"]
     capacidade = sum(s["cota_diaria"] for s in saidas)

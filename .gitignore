@@ -13,6 +13,9 @@ browser.json
 config.toml
 hierarquia.toml
 
+# pacotes de análises para compartilhar (#96): ficam em ~/.local/share/yt-music-curator/exportacoes, mas por garantia
+curator-analises-*.zip
+
 # modelos Essentia e áudio baixado
 models/
 *.pb

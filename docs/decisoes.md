@@ -23,6 +23,8 @@
 - [ADR-13: Recomendações fora da biblioteca](#adr-13-recomendações-fora-da-biblioteca)
 - [ADR-14: Afinidade de gênero-pai (#83)](#adr-14-afinidade-de-gênero-pai-83)
 - [ADR-15: Análises extras e metadados externos (#88)](#adr-15-análises-extras-e-metadados-externos-88)
+- [ADR-16: Compartilhar análises entre pessoas (#96)](#adr-16-compartilhar-análises-entre-pessoas-96)
+- [ADR-17: Gênero-pai aprendido com os rótulos do usuário (#93)](#adr-17-gênero-pai-aprendido-com-os-rótulos-do-usuário-93)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -537,6 +539,11 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Na **menor dúvida** sobre escopo ou modo, confirmar antes de executar. O terminal mostra o resumo (modo, escopo, sementes, fontes, destino) e pede confirmação (`--sim` pula; fora de um terminal, sem `--sim`, recusa). No MCP, `modo` não tem padrão: sem ele, a ferramenta devolve um erro pedindo para confirmar com o usuário. As instruções do servidor e `exemplos_de_recomendacoes` trazem os três casos de referência (ver Fluxos).
 - **Modo rápido:** sem baixar nada. Cada aparição numa coleta vale `peso_da_fonte × (1 − ½·posição/tamanho)` (YT rádio 1,0; relacionadas 0,8; Deezer 0,6), somado entre sementes. Limite por artista, desempate por video_id.
 - **Modo lento:** as `analisar_top` (60) melhores do ranking rápido entram na fila de download com **prioridade 1**: só baixam quando não há faixa da biblioteca pendente para a saída, sem cota própria. A recomendação fica "aguardando_analise" até a fila terminar (`curator recomendacoes concluir`, `--aguardar` ou `--parcial`). Ordem final: 0,6 × motor (similaridade com as sementes analisadas, perfil-alvo e gêneros, como numa receita; z-score sobre a biblioteca, para as candidatas não mexerem na régua) + 0,4 × coleta. `perfil_alvo` e `generos_preferidos` só existem no modo lento.
+- **Popularidade e novidade (#87):** valem nos dois modos.
+  - `popularidade` (alvo 0..1 no percentil das visualizações da biblioteca, em escala log) multiplica o score por exp(−peso·dz²/2). O dz é a distância ao alvo dividida pelo desvio do percentil (≈ 0,29), e uma faixa sem o dado custa um desvio, como uma feature ausente na receita.
+  - `publicadas_desde` deixa só o que foi publicado a partir da data, e a faixa sem data sai.
+  - As candidatas não têm esses dados: antes de ordenar, as `estatisticas_top` (100) melhores pelas coletas recebem visualizações e data pelo `get_song`, uma chamada por faixa, guardada com a validade do `sincronizar`. Refazer a recomendação usa o que foi guardado, sem rede.
+  - A régua é sempre a biblioteca utilizável: uma candidata não muda o percentil das outras.
 - **Misturar:** as faixas da biblioteca que os rádios trouxeram, completadas pelo motor (parecidas com as sementes, com as análises que já existem) e intercaladas às novas na proporção pedida (padrão 50%).
 
 **Destino:** conforme o comando. Por padrão, só a lista. Com `--criar-playlist` (MCP: `criar_plano_da_recomendacao`), um plano de playlist **nova** "Descobertas · <pedido>", que é marcada `descobertas` ao ser aplicada. Acrescentar recomendações a uma playlist sua existente é recusado pelo próprio plano (`NovasNaBiblioteca`), salvo com `--adicionar-em X --permitir-novas`.
@@ -616,8 +623,115 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 **Limites conhecidos:**
 - Os gêneros externos são do artista e do álbum muito mais que da faixa (no MusicBrainz, poucas gravações têm voto). Eles não separam as faixas de um mesmo artista, que é justamente o caso difícil (Alec Benjamin, Twenty One Pilots).
 - O mapa de rótulos externos para os pais do Discogs (`generos.pais_de_rotulo`) é uma heurística por palavras.
-- O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). O `curator analisar --so-extras` é a forma provisória de passá-la nas faixas já analisadas e sai quando a biblioteca estiver completa (#92).
-- Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos até a #93.
+- O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). Ela foi feita em 06/11 com uma opção provisória, `--so-extras`, que saiu na #92: hoje o `curator analisar` completa sozinho, depois da fila, os extras que faltam nas faixas com áudio guardado.
+- Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos. A régua aprendida (ADR-17) chega a 0,966, mas ainda fica ao lado.
+
+---
+
+## ADR-16: Compartilhar análises entre pessoas (#96)
+
+**Contexto:**
+- Baixar e analisar uma biblioteca leva dias: a da #90 levou ~19 h só de download, e a análise do núcleo leva ~7 s por faixa.
+- Dois amigos do usuário querem usar o projeto, e as bibliotecas se sobrepõem.
+- Uma análise depende só do áudio e do analisador, não de quem ouve. Pode ser feita uma vez e passada adiante.
+
+**Decisão:** `curator analises exportar` gera um pacote, e `curator analises importar` traz o de outra pessoa (`banco/compartilhar.py`, migração 019).
+
+1. **O que vai.** Só o que é igual para todo mundo:
+   - os metadados públicos da faixa (título, artistas, álbum, duração, ISRC, explícita, tipo de vídeo, visualizações, data de publicação);
+   - a análise do núcleo (features, vetores, rótulos dos modelos) e os extras da #88;
+   - os metadados externos (Deezer, MusicBrainz).
+2. **O que nunca vai:**
+   - curtidas e a posição nelas, likes e dislikes, playlists;
+   - receitas, planos, recomendações e coletas (as sementes revelam a biblioteca), clusters e projeções;
+   - fila, proxies e saídas (os IPs), config e credenciais;
+   - o áudio e qualquer caminho local (o `fonte_ref` da pasta local sai vazio);
+   - os tempos da máquina e as datas que mostram quando a faixa entrou na biblioteca;
+   - as faixas de playlists ignoradas (#77).
+
+   O esquema do pacote é uma lista fechada de tabelas e colunas (`TABELAS`). Uma coluna nova no banco não vai junto sem alguém pôr ela ali.
+3. **Formato:** um zip com `manifesto.json` (versões, contagens, SHA-256) e `analises.db`, um SQLite só com essas tabelas.
+4. **Importar é tratar dado não confiável.** Antes de gravar qualquer coisa, a importação confere:
+   - o zip (só os dois arquivos, tamanho máximo);
+   - o SHA-256;
+   - o `integrity_check`, com `trusted_schema = OFF`;
+   - o esquema (sem view nem trigger);
+   - os ids, a dimensão de cada vetor contra os rótulos, os valores finitos e as referências entre as tabelas.
+
+   Qualquer falha recusa o pacote inteiro.
+5. **Precedência:**
+   - Só entra análise com a versão do analisador e o hash dos modelos atuais.
+   - Um extra entra só com o hash atual dele e sobre a mesma análise (mesma fonte de áudio).
+   - Uma análise local válida nunca é sobrescrita. Uma local com erro ou desatualizada é trocada, porque seria refeita de qualquer jeito.
+   - Quem estava na fila sai dela.
+   - O mesmo pacote de novo, depois de uma atualização do analisador por exemplo, traz só o que faltava, na mesma importação.
+6. **Importada continua NOVA.**
+   - Conhecida é só curtida ∪ playlist própria (`consultas.BIBLIOTECA`). Ter análise ou estar em `faixas` não conta.
+   - A base do z-score, das réguas de gênero, dos clusters e do mapa é `espacos.da_biblioteca`.
+   - A importação nunca escreve curtida, avaliação nem playlist. Por isso a biblioteca, as recomendações, a régua e as receitas ficam idênticas antes e depois (teste em `tests/test_compartilhar.py`).
+   - O que muda é bom: uma candidata de recomendação já analisada não vai para a fila do modo lento, e uma faixa importada que o usuário curtir depois entra na biblioteca sem download.
+7. **Origem e desfazer.**
+   - Cada linha importada guarda o `importacao_id`. Uma análise refeita aqui volta a ser local sozinha, porque o worker regrava a linha inteira.
+   - `curator analises remover` apaga só o que veio da importação. As faixas da biblioteca que perdem a análise voltam para a fila.
+8. **Escopo e privacidade.**
+   - A lista de faixas do pacote, sozinha, mostra o que a pessoa escuta: é o preço da ideia.
+   - `--so-biblioteca` deixa de fora as candidatas de recomendação analisadas.
+   - As análises importadas só são repassadas com `--com-importadas`, para a origem não se perder.
+9. **Tamanho** (biblioteca real, 07/11):
+   - 3.327 faixas dão 86 MB zipado e 152 MB descompactado, ~26 KB por faixa;
+   - sem os extras, 47 MB;
+   - a exportação leva ~3 s, e a importação num banco vazio ~1 s.
+
+10. **Onde fica o pacote (#97, decidido em 07/11): numa Release do GitHub.**
+    - Quem exporta cria uma Release `analises-AAAA-MM-DD` com o zip anexado.
+    - Os amigos, que já precisam do repositório para instalar, baixam o mais recente com `gh release download`.
+    - O asset fica fora do histórico do git, aceita até 2 GB por arquivo e tem a data na tag.
+    - Ele é visível para quem tem acesso ao repositório: a lista de faixas também.
+
+**Alternativas rejeitadas:**
+- **Commitar o pacote no repositório:** cada atualização soma dezenas de MB ao histórico para sempre, e o pacote da biblioteca (86 MB) logo passa do limite de 100 MB por arquivo do GitHub.
+- **Git LFS:** tem cota gratuita limitada e exige o git-lfs em cada máquina.
+- **Mandar o arquivo direto:** é mais privado, mas fica sem versão. Continua possível.
+- **Mandar o backup (#50):** leva o banco inteiro, com curtidas, playlists e receitas.
+- **Exportar em JSON:** os vetores em float32 ficariam ~4× maiores e mais lentos de conferir.
+- **Uma API ou servidor compartilhado:** é infraestrutura demais para um grupo de amigos.
+
+---
+
+## ADR-17: Gênero-pai aprendido com os rótulos do usuário (#93)
+
+**Contexto:** as réguas do ADR-14 e do ADR-15 são zero-shot. Usam a taxonomia do Discogs e não sabem o que o usuário chama de cada gênero. No Discogs, "J-pop" é etiqueta de mercado, e por isso a régua com o MAEST tira o rock japonês do Rock. Nenhuma regra fixa acerta os dois lados (ADR-15).
+
+**Decisão:** um modelo por gênero-pai, aprendido com os rótulos do usuário (`motor/aprendido.py`, migração 020). Por ora, ele fica **ao lado**, e as receitas seguem a régua v2.
+
+1. **Rótulos.**
+   - Ficam em `rotulos_genero` ("esta faixa é / não é Rock") e **nunca** vêm das playlists existentes.
+   - Começam pelo gabarito pessoal (`curator generos importar-gabarito`): um artista do gabarito rotula todas as faixas dele, e as faixas do gabarito faixa a faixa entram uma a uma. Um rótulo da faixa vence um do artista.
+   - Os negativos implícitos: uma faixa marcada como de outro pai, e sem rótulo neste, conta como "não".
+   - Os rótulos são pessoais e ficam fora do pacote da #96.
+2. **Modelo.**
+   - Regressão logística L2 (λ = 20), com as classes balanceadas e resolvida por IRLS na forma dual, em numpy.
+   - Atributos: o embedding do EffNet e as 519 saídas do MAEST, em z-score sobre a biblioteca.
+   - É determinística: mesmos rótulos + mesma biblioteca → mesma afinidade. A versão é o hash dos rótulos.
+   - Só tem modelo o pai com 20 positivos de 3 artistas e 20 negativos. Os outros ficam com a régua do ADR-14.
+3. **Escala.** A mesma ideia da régua: 1,0 = tão típica quanto a mediana do núcleo aprendido, que são as faixas da biblioteca com p ≥ 0,5. Os níveis 0,7 / 0,8 / 1,0 valem igual.
+4. **Portão.** O modelo só conhece os pais rotulados e, sem portão, decide entre eles até para o que não é nenhum: O Lago dos Cisnes ia para o Hip Hop, e 70% das faixas clássicas e de trilha sonora iam para o Electronic. Por isso ele só julga a faixa que a régua v2 põe em primeiro lugar num pai com modelo. Isso é reconhecimento em conjunto aberto, como em Scheirer et al. (2013).
+5. **Os rótulos vencem.** Uma faixa marcada "sim" tem pelo menos 1,0, e uma marcada "não" fica com 0, com ou sem portão.
+6. **Aprendizado ativo** (Settles, 2009). `curator generos rotular PAI` e as ferramentas `faixas_para_rotular`/`rotular_genero` do MCP perguntam primeiro as faixas sem rótulo que as réguas (v2, com o MAEST, aprendida) põem de lados opostos do corte 0,8. Depois vêm as perto do corte, com no máximo 2 por artista e sem repetir a mesma música. A IA só grava a resposta do usuário.
+7. **Por que ao lado, e não nas receitas.** Deixando o artista inteiro de fora (10 dobras por artista), o modelo passa nos três critérios da #93:
+   - rap faixa a faixa com AUC 1,000;
+   - Pop por artista com AUC 0,966 (régua v2: 0,854);
+   - 98% do rock japonês ≥ 0,8 no Rock (régua com o MAEST: 54%).
+
+   Mas o gabarito só tem rock japonês e nenhum pop japonês nem de anime. O modelo aprendeu que "produção japonesa de anime = Rock": põe no Rock músicas de idol e de personagem (Petit Rabbit's, 七森中☆ごらく部) e tira do Pop ClariS e YOASOBI. Também põe trilhas de jogo (HOYO-MiX) no Hip Hop. Trocar a régua das receitas agora trocaria um erro por outro.
+
+   Essas faixas são exatamente as primeiras que o aprendizado ativo pergunta. Com elas rotuladas, a decisão volta a ser medida (`contrib/avaliacao/genero_aprendido.py`). Para adotar a régua: `generos.REGUA_RECEITAS = "aprendida"` e um `VERSAO_MOTOR` novo. A versão do banco da execução já leva o hash dos rótulos.
+
+**Testado e não adotado:**
+- **YAMNet e as tags do MSD como atributos a mais:** dentro do ruído.
+- **A média da aprendida com uma das réguas:** devolve parte do rock japonês ao Pop (87–89%) e derruba a revocação do Pop no 0,8 para 0,36.
+- **Negativos de fundo** (o núcleo dos pais sem rótulo como "não"): pioram o Electronic (AUC 0,966 → 0,908), porque trilha de jogo e eletrônica se parecem.
+- **Aprendizado por reforço:** exige milhares de tentativas com recompensa e explora ao acaso.
 
 ---
 
@@ -683,4 +797,6 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Gemmeke, J. F., Ellis, D. P. W., Freedman, D., Jansen, A., Lawrence, W., Moore, R. C., Plakal, M., & Ritter, M. (2017). *Audio Set: An ontology and human-labeled dataset for audio events*. ICASSP 2017. YAMNet: <https://github.com/tensorflow/models/tree/master/research/audioset/yamnet>.
 - Alonso-Jiménez, P., Serra, X., & Bogdanov, D. (2023). *Efficient Supervised Training of Audio Transformers for Music Representation Learning*. ISMIR 2023. arXiv:2309.16418.
 - Kim, J. H., Tomasik, B., & Turnbull, D. (2009). *Using Artist Similarity to Propagate Semantic Information*. ISMIR 2009.
+- Settles, B. (2009). *Active Learning Literature Survey*. Computer Sciences Technical Report 1648, University of Wisconsin–Madison.
+- Scheirer, W. J., de Rezende Rocha, A., Sapkota, A., & Boult, T. E. (2013). *Toward Open Set Recognition*. IEEE Transactions on Pattern Analysis and Machine Intelligence, 35(7), 1757–1772.
 - Sturm, B. L. (2014). *A simple method to determine if a music information retrieval system is a "horse"*. IEEE Transactions on Multimedia, 16(6), 1636–1644. doi:10.1109/TMM.2014.2330697.

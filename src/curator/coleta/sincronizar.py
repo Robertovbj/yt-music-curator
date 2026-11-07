@@ -391,7 +391,38 @@ def completar_estatisticas(
             ORDER BY estatisticas_em IS NOT NULL, estatisticas_em, video_id""",
         {"vencido": vencido, "agora": agora_s, "forcar": forcar},
     ).fetchall()
-    for f in pendentes[:por_rodada]:
+    _buscar_estatisticas(con, cli, pendentes[:por_rodada], r, momento)
+    if len(pendentes) > por_rodada:
+        r.conta("faltam", len(pendentes) - por_rodada)
+    return r
+
+
+def estatisticas_de(con: sqlite3.Connection, cli: ClienteYT, ids: list[str], ttl_dias: float = 30) -> Resumo:
+    """As mesmas estatísticas para faixas escolhidas (#87: as melhores candidatas de uma recomendação), só as
+    que não têm o dado dentro da validade nem uma falha recente."""
+    r = Resumo()
+    momento = datetime.now(UTC)
+    agora_s = momento.strftime("%Y-%m-%dT%H:%M:%SZ")
+    vencido = (momento - timedelta(days=ttl_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    linhas = []
+    for i in range(0, len(ids), 900):
+        lote = ids[i : i + 900]
+        linhas += con.execute(
+            f"""SELECT video_id, titulo, estatisticas_tentativas FROM faixas
+                WHERE video_id IN ({",".join("?" * len(lote))})
+                  AND (estatisticas_em IS NULL OR estatisticas_em < ?)
+                  AND (estatisticas_proxima IS NULL OR estatisticas_proxima <= ?)""",
+            (*lote, vencido, agora_s),
+        ).fetchall()
+    ordem = {v: i for i, v in enumerate(ids)}
+    _buscar_estatisticas(con, cli, sorted(linhas, key=lambda f: ordem[f["video_id"]]), r, momento)
+    return r
+
+
+def _buscar_estatisticas(
+    con: sqlite3.Connection, cli: ClienteYT, linhas, r: Resumo, momento: datetime
+) -> None:
+    for f in linhas:
         try:
             song = cli.chamar("get_song", f["video_id"])
         except Exception as e:
@@ -413,6 +444,3 @@ def completar_estatisticas(
             (_contagem(detalhes.get("viewCount")), publicada, agora(), f["video_id"]),
         )
         r.conta("buscadas" if detalhes else "sem_dados")
-    if len(pendentes) > por_rodada:
-        r.conta("faltam", len(pendentes) - por_rodada)
-    return r

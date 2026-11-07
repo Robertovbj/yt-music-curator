@@ -236,3 +236,53 @@ Revocação / falsos positivos no corte 0,8:
 - Ficam como candidatas a atributo do modelo aprendido (#93), não como régua.
 
 **Custo** (faixa de ~3 min 30 s, CPU de 8 núcleos): núcleo ~7 s; tags do MSD ~2,4 s; YAMNet ~0,9 s; MAEST ~12 s. A RAM do worker vai de 1,5 GB para 2,8 GB. Metadados: ~1,5 s por faixa no Deezer e ~4,4 s no MusicBrainz (1 pedido/s). Na amostra, 88% casaram no Deezer e 90% no MusicBrainz, antes do casamento mais tolerante a títulos "original - tradução".
+
+## Gênero-pai aprendido com os rótulos (#93)
+
+**Data:** 2026-11-07 · **Decisão:** ADR-17 · **Script:** `contrib/avaliacao/genero_aprendido.py`.
+
+**Como foi medido:**
+- **Base:** cópia do banco real de 07/11, com 3.322 faixas analisadas, todas com o MAEST.
+- **Rótulos:** o gabarito da #83 importado com `curator generos importar-gabarito`: 388 faixas pelo artista e 64 faixas de rap uma a uma.
+- **Validação:** deixando o artista inteiro de fora, com 10 dobras por artista. O modelo de cada dobra nunca viu uma faixa do artista que prevê.
+- **Modelo:** regressão logística L2 (λ = 20) sobre o EffNet + MAEST. A escala relativa ao núcleo aprendido é a mediana de p nas faixas com p ≥ 0,5.
+
+AUC, e revocação / falsos positivos no corte 0,8:
+
+| Gabarito | v2 (receitas) | Com o MAEST | Aprendida |
+|---|---|---|---|
+| Hip Hop por artista (50 × 361) | 0,999 · 0,43 / 0,00 | 1,000 · 0,29 / 0,00 | 0,996 · 0,86 / 0,01 |
+| Rap faixa a faixa (43 × 21) | 0,946 · 0,91 / 0,14 | 0,994 · 0,91 / 0,00 | **1,000 · 1,00 / 0,05** |
+| Rock por artista (140 × 258) | 0,996 · 0,84 / 0,01 | 0,996 · 0,79 / 0,00 | 0,991 · 0,94 / 0,01 |
+| Rock japonês ≥ 0,8 (46 faixas) | 0,87 | 0,54 | **0,98** |
+| Pop por artista (176 × 222) | 0,854 · 0,21 / 0,04 | 0,877 · 0,12 / 0,04 | **0,966 · 0,88 / 0,07** |
+| Electronic por artista (32 × 366) | 0,869 · 0,59 / 0,11 | 0,938 · 0,78 / 0,10 | 0,966 · 0,53 / 0,01 |
+
+- **Critérios da #93:** os três passam no gabarito. São rap faixa a faixa ≥ 0,99, Pop ≥ 0,95 e ≥ 80% do rock japonês ≥ 0,8.
+- **Atributos a mais:** YAMNet e as tags do MSD ficaram dentro do ruído (Pop 0,975–0,979, Electronic 0,957–0,969).
+- **Escala:**
+  - pela mediana dos positivos do treino, o Hip Hop por artista cai para 0,57 de revocação;
+  - por "p ≥ 0,5" (sem núcleo), sobe para 0,86, mas com o Pop em 0,99 / 0,15.
+- **Média da aprendida com uma régua:** Pop cai para 0,36–0,46 de revocação no 0,8, e o rock japonês volta para 87–93%.
+
+**Fora dos quatro gêneros rotulados (biblioteca inteira).** Sem portão, o modelo decide entre os pais que conhece até para o que não é nenhum deles. Das faixas que a v2 põe em primeiro lugar em pais sem rótulo, uma fração passa no 0,8 do Electronic e do Hip Hop:
+
+| Primeiro lugar na v2 | Faixas | Electronic ≥ 0,8 | Hip Hop ≥ 0,8 |
+|---|---|---|---|
+| Classical | 588 | 84% | 30% |
+| Stage & Screen | 246 | 63% | 60% |
+
+O Lago dos Cisnes ficou com 1,24 no Hip Hop. Duas correções foram testadas:
+- **Portão:** só julga a faixa que a v2 põe num pai com modelo. Zera esses casos sem mudar nenhuma linha da tabela acima.
+- **Negativos de fundo:** o núcleo dos pais sem rótulo como "não". Derruba o Electronic para 0,908.
+
+O ADR-17 fica com o portão.
+
+**Por que ainda ao lado.** Com o portão, o que a aprendida muda na biblioteca, entre as faixas sem rótulo, numa amostra:
+- **Hip Hop:** entram Flo Rida e funk brasileiro, e sai "Heat Waves". Também entram trilhas de HOYO-MiX.
+- **Rock:** entram o rock de anime (ZAQ, 鈴木このみ), mas também o pop de idol e de personagem (Petit Rabbit's, 七森中☆ごらく部, ヒャダイン).
+- **Pop:** saem YOASOBI, ClariS e GARNiDELiA.
+
+O gabarito só tem rock japonês, então o modelo aprendeu "produção japonesa de anime = Rock". As primeiras perguntas do aprendizado ativo (`curator generos rotular Rock` / `Pop`) são exatamente essas faixas, com a v2 em 0,1 e a aprendida em 1,0 no Rock, ou o contrário no Pop.
+
+**Custo:** montar os quatro modelos leva ~0,3 s. Eles são refeitos quando mudam os rótulos ou as análises.

@@ -57,13 +57,22 @@ e NUNCA sugira mexer numa delas sem ele nomear qual. Por isso:
 Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1. Estilos, humores e instrumentos são saídas dos
 modelos (0..1, cada uma isolada; um estilo raramente passa de 0,5). genero_pai_min é outra régua: a afinidade
 RELATIVA ao núcleo do gênero na biblioteca (1,0 = tão típica quanto a faixa mediana do núcleo; 0,7 amplo, 0,8
-normal, 1,0 estrito), igual para todos os gêneros. O examinar_genero mostra também a afinidade_com_maest (a
-mesma régua com o MAEST, outra rede; ADR-15), que a receita NÃO usa: compare as duas na fronteira.
+normal, 1,0 estrito), igual para todos os gêneros. O examinar_genero mostra ao lado a afinidade_com_maest (ADR-15) e,
+nos gêneros que o usuário rotulou, a afinidade_aprendida com os rótulos DELE (ADR-17). A receita NÃO usa as duas:
+compare na fronteira, e um rotulo_do_usuario vale mais que qualquer régua.
+RÓTULOS DE GÊNERO (#93): quando o usuário quiser ensinar o que ele chama de um gênero, ou quando a fronteira estiver
+ruim, use faixas_para_rotular(pai) e PERGUNTE a ele, faixa a faixa, se é do gênero. Grave com rotular_genero SÓ a
+resposta dele: nunca rotule pelo que você acha, nem a partir de uma playlist.
 Antes de fixar o limite, chame examinar_genero(pai, limite) e olhe as faixas logo acima e logo abaixo do corte:
 use o que você sabe dos artistas e as outras_visoes (MAEST, Rapping/Singing do YAMNet, gêneros do MusicBrainz e do
 Deezer) para subir ou descer o limite (é a receita que guarda o número, então o resultado continua reprodutível). Pedido "só com vocal"/"sem lo-fi":
 filtros.max.instrumental 0,5. Pop e Electronic quase não se separam pelo áudio (estes modelos chamam a produção
 pop de Electronic): para eles prefira perfil_alvo, sementes e estilos específicos a genero_pai_min.
+POPULARIDADE (visualizações de todo o YouTube, não as do usuário): `popularidade` é o percentil na biblioteca, de
+0 (lado B) a 1 (as mais vistas). Na receita, vale em perfil_alvo e em filtros.min/max, como uma feature. Nas
+recomendações, use o campo `popularidade` {"alvo"} e `publicadas_desde` (lançamentos). "Só a versão de estúdio",
+"sem clipe", "sem cover" → filtros.tipos_video ["faixa"]. Veja a cobertura em descrever_vocabulario("features"):
+sem dados, ofereça `curator sincronizar` em vez de usar.
 """
 
 
@@ -126,7 +135,8 @@ def estatisticas() -> dict:
 def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     """Faixas cujo título, artista ou álbum contém o texto (sem acento/caixa). Devolve video_id para usar como semente.
 
-    `dislike`: o usuário não gosta; nunca use como semente nem sugira. `na_biblioteca`: curtida ou numa playlist dele."""
+    `dislike`: o usuário não gosta; nunca use como semente nem sugira. `na_biblioteca`: curtida ou numa playlist dele.
+    `importada`: a análise veio de outra pessoa (#96); fora da biblioteca, é uma música NOVA para o usuário."""
     con = banco()
     q = normalizar(texto)
     analisadas = set(espacos.analisadas(con))
@@ -145,10 +155,35 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     meta = _faixas(con, achadas)
     biblioteca = set(consultas.biblioteca(con))
     dislikes = consultas.com_dislike(con)
+    uso = _dados_de_uso(con, achadas)
+    from curator.banco.compartilhar import importadas
+
+    de_fora = importadas(con)
     return [
-        {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes}
+        {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes,
+         **({"importada": True} if v in de_fora else {}), **uso[v]}
         for v in achadas
-    ]
+    ]  # fmt: skip
+
+
+def _dados_de_uso(con, ids: list[str]) -> dict[str, dict]:
+    """Tipo do vídeo, visualizações, percentil na biblioteca e data de publicação (#85/#87), só o que existir."""
+    from curator.motor import popularidade
+
+    pct = popularidade.percentis(con, ids)
+    tipo = popularidade.tipos(con, ids)
+    out = {v: {} for v in ids}
+    for r in con.execute(
+        f"SELECT video_id, visualizacoes, publicada_em FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})",
+        ids,
+    ):
+        out[r["video_id"]] = {k: v for k, v in {
+            "tipo_video": tipo[r["video_id"]], "visualizacoes": r["visualizacoes"], "publicada_em": r["publicada_em"],
+        }.items() if v is not None}  # fmt: skip
+    for v, p in zip(ids, pct, strict=True):
+        if not np.isnan(p):
+            out[v]["popularidade"] = round(float(p), 3)
+    return out
 
 
 def buscar_artistas(texto: str, limite: int = 20) -> list[dict]:
@@ -201,7 +236,14 @@ def descrever_vocabulario(
                 continue
             out.append({"feature": c, **({"p10": round(float(np.percentile(x, 10)), 3), "mediana": round(float(np.median(x)), 3),
                                           "p90": round(float(np.percentile(x, 90)), 3)} if len(x) else {})})  # fmt: skip
-        return {"grupo": grupo, "faixas_analisadas": len(esc.ids), "itens": out}
+        from curator.motor import popularidade
+
+        if not f or f in "popularidade":
+            out.append({"feature": "popularidade", "escala": "percentil das visualizações na biblioteca (0 = lado B, "
+                        "1 = as mais vistas; p10/mediana/p90 = 0,1/0,5/0,9 por construção)",
+                        "cobertura": popularidade.cobertura(con)})  # fmt: skip
+        return {"grupo": grupo, "faixas_analisadas": len(esc.ids), "itens": out,
+                "tipos_video": popularidade.TIPOS_VIDEO}  # fmt: skip
     if grupo in ("generos_pai", "estilos"):
         d = espacos.probabilidades(con, "discogs400")
         dominantes = [d.colunas[int(np.argmax(row))] for row in d.X] if len(d.ids) else []
@@ -217,10 +259,8 @@ def descrever_vocabulario(
             afin = generos.Afinidades(con)
             base = espacos.da_biblioteca(con)
             for it in itens:
-                rel = afin.relativa(it["nome"], base)
-                reg = afin.reguas[it["nome"]]
-                it["regua"] = {"tipo": reg.tipo, "faixas_no_nucleo": reg.nucleo,
-                               "com_maest": reg.referencia_maest is not None}  # fmt: skip
+                rel = afin.relativa_receita(it["nome"], base)
+                it["regua"] = _regua(afin, it["nome"])
                 it["faixas_por_nivel"] = {n: int((rel >= t).sum()) for n, t in generos.NIVEIS.items()}
         itens.sort(key=lambda x: (-x["faixas_dominante"], x["nome"]))
         return {"grupo": grupo, "faixas_analisadas": len(d.ids), "itens": itens[:limite]}
@@ -265,7 +305,10 @@ def examinar_genero(
         ]
     else:
         ids = espacos.da_biblioteca(con)
-    rel, rel_m = afin.relativa(pai, ids), afin.relativa_com_maest(pai, ids)
+    rel, rel_m = afin.relativa_receita(pai, ids), afin.relativa_com_maest(pai, ids)
+    na_receita = afin.usa_aprendida(pai)
+    outra = afin.relativa(pai, ids) if na_receita else afin.relativa_aprendida(pai, ids)
+    nome_outra = "afinidade_v2" if na_receita else "afinidade_aprendida"
     tem_m = (
         afin.fracao_maest(ids)[1]
         if afin.reguas[pai].referencia_maest is not None
@@ -282,25 +325,64 @@ def examinar_genero(
         x = esc.X[esc.indice[ids[i]], j] if j is not None and ids[i] in esc.indice else float("nan")
         out = {**meta[ids[i]], "afinidade": round(float(rel[i]), 3),
                "instrumental": None if np.isnan(x) else round(float(x), 2)}  # fmt: skip
+        if not np.isnan(outra[i]):
+            out[nome_outra] = round(float(outra[i]), 3)
+        if (r := afin.aprendido.rotulo(pai, ids[i])) is not None:
+            out["rotulo_do_usuario"] = "sim" if r else "não"
         if tem_m[i]:
             out["afinidade_com_maest"] = round(float(rel_m[i]), 3)
         if v := visoes.da_faixa(ids[i], pai):
             out["outras_visoes"] = v
         return out
 
-    reg = afin.reguas[pai]
     return {
         "pai": pai,
         "limite": limite,
-        "regua": {
-            "tipo": reg.tipo,
-            "faixas_no_nucleo": reg.nucleo,
-            "com_maest": reg.referencia_maest is not None,
-        },
+        "regua": _regua(afin, pai),
         "faixas_por_limite": {str(t): int((rel >= t).sum()) for t in (0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2)},
         "acima": [item(i) for i in ordem[max(0, corte - n) : corte]],
         "abaixo": [item(i) for i in ordem[corte : corte + n]],
     }
+
+
+def _regua(afin, pai: str) -> dict:
+    reg = afin.reguas[pai]
+    out = {"tipo": "aprendida" if afin.usa_aprendida(pai) else reg.tipo, "faixas_no_nucleo": reg.nucleo,
+           "com_maest": reg.referencia_maest is not None}  # fmt: skip
+    if m := afin.aprendido.modelos.get(pai):
+        out["aprendida"] = {"rotulos": {"positivos": m.positivos, "negativos": m.negativos, "artistas": m.artistas},
+                            "faixas_no_nucleo": m.nucleo, "na_receita": afin.usa_aprendida(pai)}  # fmt: skip
+    return out
+
+
+def faixas_para_rotular(pai: str, quantas: int = 10) -> dict:
+    """As faixas sem rótulo do gênero em que a resposta do usuário mais ensina: primeiro as que as réguas põem de
+    lados opostos do corte 0,8, depois as perto do corte (no máximo 2 por artista). PERGUNTE ao usuário, uma a uma,
+    se a faixa é do gênero, e grave a resposta com rotular_genero. Não responda por ele."""
+    from curator.motor import aprendido
+
+    con = banco()
+    try:
+        lista = aprendido.duvidosas(con, pai, quantas)
+    except KeyError:
+        return {"erros": [f"gênero-pai '{pai}' não existe; veja descrever_vocabulario('generos_pai')"]}
+    meta = _faixas(con, [d["video_id"] for d in lista])
+    return {"pai": pai, "faixas": [{**meta[d["video_id"]], **d} for d in lista],
+            "como_rotular": "rotular_genero(video_id, pai, pertence=True/False), só com a resposta do usuário"}  # fmt: skip
+
+
+def rotular_genero(video_id: str, pai: str, pertence: bool | None) -> dict:
+    """Grava a resposta do USUÁRIO: a faixa é (pertence=True) ou não é (False) do gênero-pai; None apaga o rótulo.
+    Nunca rotule pelo que você acha nem a partir de uma playlist: só com o que o usuário disse."""
+    from curator.motor import aprendido, generos
+
+    con = banco()
+    if pai not in generos.Afinidades(con).pais:
+        return {"erros": [f"gênero-pai '{pai}' não existe"]}
+    if not con.execute("SELECT 1 FROM faixas WHERE video_id = ?", (video_id,)).fetchone():
+        return {"erros": [f"faixa {video_id} não está no banco"]}
+    aprendido.rotular(con, video_id, pai, pertence, "mcp")
+    return {"ok": True, "video_id": video_id, "pai": pai, "pertence": pertence}
 
 
 def exemplos_de_receitas() -> list[dict]:
@@ -619,14 +701,19 @@ def recomendar_novas(
     excluir_artistas: list[str] | None = None,
     perfil_alvo: dict[str, Any] | None = None,
     generos_preferidos: dict[str, float] | None = None,
+    popularidade: dict[str, float] | None = None,
+    publicadas_desde: str | None = None,
     pedido: str | None = None,
 ) -> dict:
     """Recomenda SÓ músicas novas (fora da biblioteca) parecidas com as sementes: faixas (video_ids de
     buscar_faixas), uma playlist, um cluster ou um artista. `modo` é obrigatório: se o usuário não disse rápido
-    ou lento, PERGUNTE antes. perfil_alvo/generos_preferidos (como na receita) só no modo lento."""
+    ou lento, PERGUNTE antes. perfil_alvo/generos_preferidos (como na receita) só no modo lento.
+    `popularidade` {"alvo": 0..1, "peso"}: 1 = as mais vistas, 0 = lado B (percentil das visualizações na
+    biblioteca). `publicadas_desde` "AAAA-MM-DD": só lançamentos a partir da data. Os dois valem nos dois modos."""
     return _recomendar("novas", modo, pedido, faixas=faixas, playlist=playlist, cluster=cluster, artista=artista,
                        tamanho=tamanho, excluir_artistas=excluir_artistas, perfil_alvo=perfil_alvo,
-                       generos_preferidos=generos_preferidos)  # fmt: skip
+                       generos_preferidos=generos_preferidos, popularidade=popularidade,
+                       publicadas_desde=publicadas_desde)  # fmt: skip
 
 
 def recomendar_misturando_curtidas(
@@ -640,13 +727,17 @@ def recomendar_misturando_curtidas(
     excluir_artistas: list[str] | None = None,
     perfil_alvo: dict[str, Any] | None = None,
     generos_preferidos: dict[str, float] | None = None,
+    popularidade: dict[str, float] | None = None,
+    publicadas_desde: str | None = None,
     pedido: str | None = None,
 ) -> dict:
     """Mistura músicas novas com as da biblioteca (proporcao_novas = fração de novas). Use SÓ quando o usuário
-    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE."""
+    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE. `popularidade` e
+    `publicadas_desde` como em recomendar_novas."""
     return _recomendar("misturar", modo, pedido, proporcao_novas=proporcao_novas, faixas=faixas, playlist=playlist,
                        cluster=cluster, artista=artista, tamanho=tamanho, excluir_artistas=excluir_artistas,
-                       perfil_alvo=perfil_alvo, generos_preferidos=generos_preferidos)  # fmt: skip
+                       perfil_alvo=perfil_alvo, generos_preferidos=generos_preferidos, popularidade=popularidade,
+                       publicadas_desde=publicadas_desde)  # fmt: skip
 
 
 def concluir_recomendacao(recomendacao_id: int, parcial: bool = False) -> dict:
@@ -708,6 +799,7 @@ def faltantes_nas_agregadoras() -> dict:
 
 FERRAMENTAS = [
     arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario, examinar_genero,
+    faixas_para_rotular, rotular_genero,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
     sugerir_playlists_gerais, criar_plano_das_gerais, sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
     criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,
