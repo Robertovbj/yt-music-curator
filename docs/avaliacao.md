@@ -129,7 +129,7 @@ Vizinhos no MusiCNN: k de 5 a 30 e peso de 0,3 a 0,7 deram AUC entre 0,93 e 0,97
 
 ## Sinais novos de gênero (#88)
 
-**Data:** 2026-11-06 · **Decisão:** ADR-15 · **Scripts:** `contrib/avaliacao/sinais_genero.py` (todos os sinais) e `contrib/avaliacao/genero_pai.py` (as duas réguas). Mesmo gabarito da #83. Medido numa cópia do banco, com os extras calculados sobre os áudios guardados pela #90. A primeira medição (noite de 05/11) tinha o MAEST em todo o rap faixa a faixa, mas só em parte do gabarito por artista. Os números abaixo são da segunda (manhã de 06/11), com o MAEST nas 388 faixas do gabarito por artista.
+**Data:** 2026-11-06 · **Decisão:** ADR-15 · **Scripts:** `contrib/avaliacao/sinais_genero.py` (todos os sinais) e `contrib/avaliacao/genero_pai.py` (as duas réguas). Mesmo gabarito da #83. Medido numa cópia do banco, com os extras calculados sobre os áudios guardados pela #90. A primeira medição (noite de 05/11) tinha o MAEST em todo o rap faixa a faixa, mas só em parte do gabarito por artista. Os números abaixo são da segunda (manhã de 06/11), com o MAEST nas 388 faixas do gabarito por artista. A terceira, no banco real depois do deploy, tem a biblioteca inteira e vem logo depois da decisão.
 
 **Rap faixa a faixa** (43 rap × 21 não rap; AUC [IC 95%]; Δ = IC pareado contra o motor v2, nas mesmas faixas):
 
@@ -175,6 +175,31 @@ Vizinhos no MusiCNN: k de 5 a 30 e peso de 0,3 a 0,7 deram AUC entre 0,93 e 0,97
 - **O rock japonês:** das 24 faixas de Rock do gabarito que caem abaixo de 0,8 com o MAEST, 22 são de kessoku band, the peggies, Houkago Teatime e BABYMETAL. O MAEST dá a elas de 0,5 a 0,8 em "Pop---J-pop". No Discogs, J-pop é uma etiqueta de mercado (música popular japonesa) que cobre rock, idol e anime. Nas 96 faixas da biblioteca com J-pop ≥ 0,5 no MAEST (cópia de 06/11), a régua com ele leva o Rock (≥ 0,8) de 34 para 12 faixas e o Pop de 34 para 58.
 - **J-pop neutro (testado, não adotado):** zerar J-pop e K-pop no MAEST conserta o Rock (0,86 / 0,00 no 0,8) e sobe o Pop (AUC 0,968). Em troca, tira do Pop o pop idol e de anime (Hoshimachi Suisei, ClariS, Ado): das 96, as faixas sem nenhum pai ≥ 0,8 vão de 16 para 36. O gabarito não tem pop japonês, então não enxerga esse custo.
 - **Decisão:** a régua das receitas segue a v2, e a com o MAEST fica ao lado, no `examinar_genero` (ADR-15).
+
+**No banco real** (noite de 06/11, depois do deploy):
+- **Cobertura:** a biblioteca inteira tem os extras, 3.324 faixas. O MAEST falha em 5 faixas de ≤ 30 s, e elas ficam só com a v2.
+- **Núcleo:** o núcleo de cada pai passa a ser medido na biblioteca toda.
+- **Régua v2:** os mesmos números da cópia.
+- **Régua com o MAEST:** mudou, porque a mediana do MAEST no núcleo vinha de só uma parte da biblioteca.
+
+Revocação / falsos positivos no corte 0,8:
+
+| Gabarito | v2 | Com o MAEST (cópia) | Com o MAEST (banco real) |
+|---|---|---|---|
+| Rap faixa a faixa | 0,91 / 0,14 | 0,88 / 0,00 | 0,91 / 0,00 |
+| Hip Hop por artista | 0,82 / 0,00 | 0,78 / 0,00 | 0,80 / 0,00 |
+| Rock por artista | 0,84 / 0,01 | 0,73 / 0,00 | 0,79 / 0,00 |
+| Pop por artista | 0,21 / 0,04 | 0,26 / 0,06 | 0,12 / 0,04 |
+| Electronic por artista | 0,59 / 0,12 | 0,78 / 0,11 | 0,78 / 0,11 |
+
+- **AUC com o MAEST:** praticamente a mesma da cópia. No rap faixa a faixa, 0,994 [0,980; 1,000]. Por artista: Hip Hop 1,000, Rock 0,996, Pop 0,871 e Electronic 0,937.
+- **Segmento japonês** (790 faixas com título ou artista em escrita japonesa), da v2 para a com o MAEST, no 0,8:
+  - Rock: de 111 para 85 (28 saem, 2 entram);
+  - Pop: de 227 para 252;
+  - Electronic: de 144 para 87;
+  - o pai dominante muda em 17,5% delas, mais de Electronic para Pop (35) e de Rock para Pop (8).
+- **Biblioteca toda:** o pai dominante muda em 19,2% das faixas, quase sempre entre Classical e Stage & Screen (127 e 27) ou de Electronic para Pop (96).
+- **A decisão se mantém:** com o núcleo completo, a régua com o MAEST melhora no Rock, mas ainda tira rock japonês dele, e piora no Pop.
 
 **Aprendido com os rótulos** (viabilidade para a #93): regressão logística (C = 0,05, sem ajuste) sobre EffNet + MAEST, treinada no gabarito por artista e validada deixando o artista inteiro de fora (10 dobras por artista, 65 artistas):
 
