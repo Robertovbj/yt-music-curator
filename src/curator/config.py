@@ -55,7 +55,7 @@ PADRAO: dict = {
     },
     "analise": {
         # análises extras (#88, audio/extras.py): cada uma com versão própria, sem reabrir a fila do núcleo.
-        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado (analisar --so-extras)
+        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado. [] desliga (#92)
         "extras": ["msd_tags", "yamnet", "maest"],
     },
     "provedores": {

@@ -2,8 +2,8 @@
 
 O núcleo (EffNet e cabeças, MusiCNN, tempo e tom) já foi calculado para a biblioteca inteira, e o `hash_modelos`
 dele reabre a fila toda quando muda. Um extra novo só precisa rodar o próprio modelo. Com os áudios guardados
-(#84/#90), isso acontece sem rede (`curator analisar --so-extras`). Faixas novas recebem os extras na mesma
-passada do núcleo, sem decodificar o áudio de novo.
+(#84/#90), o `curator analisar` faz isso sozinho depois da fila, sem rede (#92). Faixas novas recebem os extras na
+mesma passada do núcleo, sem decodificar o áudio de novo.
 
 Por que estes três (pesquisa da #83, ADR-14): a fusão Discogs + Jamendo ganhou pouco porque as duas cabeças usam o
 mesmo embedding, e ensembles ganham com diversidade (Kuncheva & Whitaker, 2003).

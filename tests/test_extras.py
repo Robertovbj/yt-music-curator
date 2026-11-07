@@ -164,3 +164,30 @@ def test_extras_reais_com_os_modelos_instalados(tmp_path):
     assert len(r["yamnet"].rotulos["yamnet"]) == 521 and "Rapping" in r["yamnet"].rotulos["yamnet"]
     r2 = an.analisar(_tom_estereo(tmp_path / "t.webm", segundos=35))
     assert all(np.array_equal(r[n].vetores[t], r2[n].vetores[t]) for n in r for t in r[n].vetores)
+
+
+def test_analisar_completa_os_extras_sem_opcao_separada(con, monkeypatch):
+    """#92: o `analisar` normal completa os extras que faltam (ou de versão nova) a partir do áudio guardado."""
+    from typer.testing import CliRunner
+
+    import curator.audio.analisador as mod_an
+    from curator.audio.worker import Relatorio
+    from curator.interfaces import cli
+    from curator.interfaces.comandos import analise
+
+    extras.gravar(con, "a", {n: res(n, h="hash-antigo") for n in HASHES}, "ref-a")  # versão antiga: refaz
+    an_extras = ExtrasFalso()
+
+    class AnalisadorComExtras:
+        def __init__(self, pasta, extras):
+            self.extras = an_extras
+
+    monkeypatch.setattr(mod_an, "Analisador", AnalisadorComExtras)
+    monkeypatch.setattr(analise, "_extras_com_modelos", lambda nomes: list(HASHES))
+    monkeypatch.setattr(analise, "_rodar_worker", lambda *a, **k: Relatorio())
+    r = CliRunner().invoke(cli.app, ["analisar"])
+    assert r.exit_code == 0, r.output
+    assert sorted(v for v, _ in an_extras.chamadas) == ["a", "b"]
+    assert extras.pendentes(con, HASHES) == []
+    for opcao in ("--so-extras", "--sem-extras"):
+        assert CliRunner().invoke(cli.app, ["analisar", opcao]).exit_code != 0

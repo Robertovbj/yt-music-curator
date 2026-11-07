@@ -616,7 +616,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 **Limites conhecidos:**
 - Os gêneros externos são do artista e do álbum muito mais que da faixa (no MusicBrainz, poucas gravações têm voto). Eles não separam as faixas de um mesmo artista, que é justamente o caso difícil (Alec Benjamin, Twenty One Pilots).
 - O mapa de rótulos externos para os pais do Discogs (`generos.pais_de_rotulo`) é uma heurística por palavras.
-- O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). O `curator analisar --so-extras` é a forma provisória de passá-la nas faixas já analisadas e sai quando a biblioteca estiver completa (#92).
+- O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). Ela foi feita em 06/11 com uma opção provisória, `--so-extras`, que saiu na #92: hoje o `curator analisar` completa sozinho, depois da fila, os extras que faltam nas faixas com áudio guardado.
 - Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos até a #93.
 
 ---

@@ -112,12 +112,7 @@ docker compose --env-file ~/.config/yt-music-curator/saidas.env up -d --build   
 docker compose --env-file ~/.config/yt-music-curator/saidas.env --profile celular up -d        # + celular
 ```
 
-**Análises extras.** Além do núcleo (EffNet e cabeças, MusiCNN, tempo e tom), o analisador guarda três visões de outras redes e outros treinos, cada uma com versão própria (`[analise] extras`): as 50 tags do MSD-MusiCNN, as 521 classes do YAMNet (AudioSet, com "Rapping" e "Singing") e os 519 estilos do MAEST. Faixas novas recebem os extras na mesma passada. Nas já analisadas, eles rodam sobre os áudios guardados, sem rede e sem reabrir a fila: ~16 s por faixa, quase tudo do MAEST. Um extra novo ou trocado refaz só ele.
-
-```sh
-uv run curator analisar --so-extras   # só os extras que faltam (provisória: sai quando a biblioteca tiver os extras, #92)
-uv run curator analisar --sem-extras  # pula os extras nesta execução
-```
+**Análises extras.** Além do núcleo (EffNet e cabeças, MusiCNN, tempo e tom), o analisador guarda três visões de outras redes e outros treinos, cada uma com versão própria (`[analise] extras`): as 50 tags do MSD-MusiCNN, as 521 classes do YAMNet (AudioSet, com "Rapping" e "Singing") e os 519 estilos do MAEST. Faixas novas recebem os extras na mesma passada. Nas já analisadas, eles rodam sobre os áudios guardados, sem rede e sem reabrir a fila: ~16 s por faixa, quase tudo do MAEST. Um extra novo ou trocado refaz só ele: o `curator analisar` completa os que faltam depois da fila, a partir do áudio guardado. Para não calcular extras, `[analise] extras = []` no config.
 
 ### Receitas, classificação e planos
 
