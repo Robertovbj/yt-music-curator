@@ -142,6 +142,19 @@ Nomes de artistas, gêneros, features e playlists são conferidos com o banco; u
 
 O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, igual para todos os gêneros. 1,0 é tão típico do gênero quanto a faixa mediana do núcleo dele na sua biblioteca, o conjunto de faixas que os dois modelos põem nesse gênero em primeiro lugar. O `examinar_genero` mostra também a mesma régua com o MAEST, que separa melhor rap e Electronic mas joga rock japonês no Pop. Por isso ela fica ao lado e não entra na receita (ADR-15, #93). Os níveis são 0,7 amplo, 0,8 normal e 1,0 estrito. Pelo MCP, `examinar_genero` mostra as faixas logo acima e logo abaixo do corte. Pop e Electronic quase não se separam pelo áudio. A decisão está no ADR-14, e a medição em `docs/avaliacao.md`.
 
+**Gênero aprendido com os seus rótulos (#93).** As réguas acima usam a taxonomia do Discogs, que não sabe o que você chama de cada gênero. No Discogs, J-pop é etiqueta de mercado: kessoku band cai no Pop. Você pode ensinar o modelo:
+
+```sh
+uv run curator generos importar-gabarito gabarito.toml   # um gabarito pessoal: artistas e faixas por gênero
+uv run curator generos rotular Rock                       # pergunta as faixas mais duvidosas, uma a uma
+uv run curator generos rotulo VIDEO_ID Rock nao           # uma faixa só (sim, nao ou apagar)
+uv run curator generos status --validar                   # rótulos por gênero e a precisão, deixando o artista de fora
+```
+
+- **Pelo MCP:** a IA mostra as faixas mais duvidosas (`faixas_para_rotular`) e grava a SUA resposta (`rotular_genero`).
+- **Origem:** os rótulos nunca vêm das playlists.
+- **Onde aparece:** a afinidade aprendida aparece ao lado no `examinar_genero`. As receitas seguem a régua do Discogs até os rótulos cobrirem o pop japonês e as trilhas (ADR-17).
+
 Popularidade e tipo do vídeo (#87) vêm do `sincronizar`:
 - **`popularidade`:** o percentil das visualizações de todo o YouTube na sua biblioteca, em escala log, de 0 (lado B) a 1 (as mais vistas). Vale em `perfil_alvo` e em `filtros.min`/`max`, como uma feature.
 - **`filtros.tipos_video`:** `["faixa"]` deixa só as faixas de áudio, sem clipes (`clipe`) nem vídeos de usuário (`usuario`). A faixa sem essa informação fica.

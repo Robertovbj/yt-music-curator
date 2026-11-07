@@ -24,6 +24,7 @@
 - [ADR-14: Afinidade de gênero-pai (#83)](#adr-14-afinidade-de-gênero-pai-83)
 - [ADR-15: Análises extras e metadados externos (#88)](#adr-15-análises-extras-e-metadados-externos-88)
 - [ADR-16: Compartilhar análises entre pessoas (#96)](#adr-16-compartilhar-análises-entre-pessoas-96)
+- [ADR-17: Gênero-pai aprendido com os rótulos do usuário (#93)](#adr-17-gênero-pai-aprendido-com-os-rótulos-do-usuário-93)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -623,7 +624,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Os gêneros externos são do artista e do álbum muito mais que da faixa (no MusicBrainz, poucas gravações têm voto). Eles não separam as faixas de um mesmo artista, que é justamente o caso difícil (Alec Benjamin, Twenty One Pilots).
 - O mapa de rótulos externos para os pais do Discogs (`generos.pais_de_rotulo`) é uma heurística por palavras.
 - O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). Ela foi feita em 06/11 com uma opção provisória, `--so-extras`, que saiu na #92: hoje o `curator analisar` completa sozinho, depois da fila, os extras que faltam nas faixas com áudio guardado.
-- Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos até a #93.
+- Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos. A régua aprendida (ADR-17) chega a 0,966, mas ainda fica ao lado.
 
 ---
 
@@ -685,6 +686,43 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - **Mandar o backup (#50):** leva o banco inteiro, com curtidas, playlists e receitas.
 - **Exportar em JSON:** os vetores em float32 ficariam ~4× maiores e mais lentos de conferir.
 - **Uma API ou servidor compartilhado:** é infraestrutura demais para um grupo de amigos.
+
+---
+
+## ADR-17: Gênero-pai aprendido com os rótulos do usuário (#93)
+
+**Contexto:** as réguas do ADR-14 e do ADR-15 são zero-shot. Usam a taxonomia do Discogs e não sabem o que o usuário chama de cada gênero. No Discogs, "J-pop" é etiqueta de mercado, e por isso a régua com o MAEST tira o rock japonês do Rock. Nenhuma regra fixa acerta os dois lados (ADR-15).
+
+**Decisão:** um modelo por gênero-pai, aprendido com os rótulos do usuário (`motor/aprendido.py`, migração 020). Por ora, ele fica **ao lado**, e as receitas seguem a régua v2.
+
+1. **Rótulos.**
+   - Ficam em `rotulos_genero` ("esta faixa é / não é Rock") e **nunca** vêm das playlists existentes.
+   - Começam pelo gabarito pessoal (`curator generos importar-gabarito`): um artista do gabarito rotula todas as faixas dele, e as faixas do gabarito faixa a faixa entram uma a uma. Um rótulo da faixa vence um do artista.
+   - Os negativos implícitos: uma faixa marcada como de outro pai, e sem rótulo neste, conta como "não".
+   - Os rótulos são pessoais e ficam fora do pacote da #96.
+2. **Modelo.**
+   - Regressão logística L2 (λ = 20), com as classes balanceadas e resolvida por IRLS na forma dual, em numpy.
+   - Atributos: o embedding do EffNet e as 519 saídas do MAEST, em z-score sobre a biblioteca.
+   - É determinística: mesmos rótulos + mesma biblioteca → mesma afinidade. A versão é o hash dos rótulos.
+   - Só tem modelo o pai com 20 positivos de 3 artistas e 20 negativos. Os outros ficam com a régua do ADR-14.
+3. **Escala.** A mesma ideia da régua: 1,0 = tão típica quanto a mediana do núcleo aprendido, que são as faixas da biblioteca com p ≥ 0,5. Os níveis 0,7 / 0,8 / 1,0 valem igual.
+4. **Portão.** O modelo só conhece os pais rotulados e, sem portão, decide entre eles até para o que não é nenhum: O Lago dos Cisnes ia para o Hip Hop, e 70% das faixas clássicas e de trilha sonora iam para o Electronic. Por isso ele só julga a faixa que a régua v2 põe em primeiro lugar num pai com modelo. Isso é reconhecimento em conjunto aberto, como em Scheirer et al. (2013).
+5. **Os rótulos vencem.** Uma faixa marcada "sim" tem pelo menos 1,0, e uma marcada "não" fica com 0, com ou sem portão.
+6. **Aprendizado ativo** (Settles, 2009). `curator generos rotular PAI` e as ferramentas `faixas_para_rotular`/`rotular_genero` do MCP perguntam primeiro as faixas sem rótulo que as réguas (v2, com o MAEST, aprendida) põem de lados opostos do corte 0,8. Depois vêm as perto do corte, com no máximo 2 por artista e sem repetir a mesma música. A IA só grava a resposta do usuário.
+7. **Por que ao lado, e não nas receitas.** Deixando o artista inteiro de fora (10 dobras por artista), o modelo passa nos três critérios da #93:
+   - rap faixa a faixa com AUC 1,000;
+   - Pop por artista com AUC 0,966 (régua v2: 0,854);
+   - 98% do rock japonês ≥ 0,8 no Rock (régua com o MAEST: 54%).
+
+   Mas o gabarito só tem rock japonês e nenhum pop japonês nem de anime. O modelo aprendeu que "produção japonesa de anime = Rock": põe no Rock músicas de idol e de personagem (Petit Rabbit's, 七森中☆ごらく部) e tira do Pop ClariS e YOASOBI. Também põe trilhas de jogo (HOYO-MiX) no Hip Hop. Trocar a régua das receitas agora trocaria um erro por outro.
+
+   Essas faixas são exatamente as primeiras que o aprendizado ativo pergunta. Com elas rotuladas, a decisão volta a ser medida (`contrib/avaliacao/genero_aprendido.py`). Para adotar a régua: `generos.REGUA_RECEITAS = "aprendida"` e um `VERSAO_MOTOR` novo. A versão do banco da execução já leva o hash dos rótulos.
+
+**Testado e não adotado:**
+- **YAMNet e as tags do MSD como atributos a mais:** dentro do ruído.
+- **A média da aprendida com uma das réguas:** devolve parte do rock japonês ao Pop (87–89%) e derruba a revocação do Pop no 0,8 para 0,36.
+- **Negativos de fundo** (o núcleo dos pais sem rótulo como "não"): pioram o Electronic (AUC 0,966 → 0,908), porque trilha de jogo e eletrônica se parecem.
+- **Aprendizado por reforço:** exige milhares de tentativas com recompensa e explora ao acaso.
 
 ---
 
@@ -750,4 +788,6 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Gemmeke, J. F., Ellis, D. P. W., Freedman, D., Jansen, A., Lawrence, W., Moore, R. C., Plakal, M., & Ritter, M. (2017). *Audio Set: An ontology and human-labeled dataset for audio events*. ICASSP 2017. YAMNet: <https://github.com/tensorflow/models/tree/master/research/audioset/yamnet>.
 - Alonso-Jiménez, P., Serra, X., & Bogdanov, D. (2023). *Efficient Supervised Training of Audio Transformers for Music Representation Learning*. ISMIR 2023. arXiv:2309.16418.
 - Kim, J. H., Tomasik, B., & Turnbull, D. (2009). *Using Artist Similarity to Propagate Semantic Information*. ISMIR 2009.
+- Settles, B. (2009). *Active Learning Literature Survey*. Computer Sciences Technical Report 1648, University of Wisconsin–Madison.
+- Scheirer, W. J., de Rezende Rocha, A., Sapkota, A., & Boult, T. E. (2013). *Toward Open Set Recognition*. IEEE Transactions on Pattern Analysis and Machine Intelligence, 35(7), 1757–1772.
 - Sturm, B. L. (2014). *A simple method to determine if a music information retrieval system is a "horse"*. IEEE Transactions on Multimedia, 16(6), 1636–1644. doi:10.1109/TMM.2014.2330697.

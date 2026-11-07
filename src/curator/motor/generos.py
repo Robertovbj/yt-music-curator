@@ -23,6 +23,10 @@ vizinhos do mesmo artista) e puxar para a média do artista (o gabarito é por a
 sonora tocam vários gêneros).
 
 Pop e Electronic não se separam bem só pelo áudio: esses modelos chamam a produção pop moderna de Electronic.
+
+**A régua aprendida com os seus rótulos (#93, ADR-17; `relativa_aprendida`)** fica ao lado, no `examinar_genero`, até
+os rótulos cobrirem o pop japonês e as trilhas: com o gabarito de hoje ela acerta o rock japonês, mas põe no Rock o
+pop de anime. `REGUA_RECEITAS = "aprendida"` a leva para as receitas (`relativa_receita`), com `VERSAO_MOTOR` novo.
 """
 
 import re
@@ -32,6 +36,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from curator.motor import espacos
+
+# a régua do `genero_pai_min` nas receitas: "v2" (ADR-14) ou "aprendida" (#93, ADR-17; onde houver modelo)
+REGUA_RECEITAS = "v2"
 
 # gênero-pai do Discogs400 → rótulos equivalentes do MTG-Jamendo (só os inequívocos)
 MAPA_JAMENDO = {
@@ -139,6 +146,8 @@ class Afinidades:
     """Afinidade e régua de todos os gêneros-pai, medidas sobre a biblioteca analisada deste banco."""
 
     def __init__(self, con: sqlite3.Connection):
+        self._con = con
+        self._aprendido = None
         self.d = espacos.probabilidades(con, "discogs400")
         self.j = espacos.probabilidades(con, "jamendo_genre")
         self.pais = sorted({c.split("---")[0] for c in self.d.colunas if "---" in c})
@@ -254,6 +263,44 @@ class Afinidades:
         if pai not in self.pais:
             return np.zeros(len(ids), np.float64)
         return self.afinidade(ids)[:, self.pais.index(pai)] / self.reguas[pai].referencia
+
+    @property
+    def aprendido(self):
+        """Os modelos aprendidos com os rótulos do usuário (#93), calculados só quando alguém pede."""
+        if self._aprendido is None:
+            from curator.motor import aprendido
+
+            self._aprendido = aprendido.obter(self._con)
+        return self._aprendido
+
+    def usa_aprendida(self, pai: str) -> bool:
+        return REGUA_RECEITAS == "aprendida" and pai in self.aprendido.modelos
+
+    def fora_do_aprendido(self, ids: list[str]) -> np.ndarray:
+        """Faixas que a régua v2 põe em 1º lugar num pai SEM modelo aprendido (trilha sonora, clássica…): o portão
+        da #93. O modelo só conhece os pais rotulados, então não julga essas."""
+        if not ids:
+            return np.zeros(0, bool)
+        refs = np.array([self.reguas[p].referencia for p in self.pais])
+        dominante = (self.afinidade(ids) / refs).argmax(axis=1)
+        com_modelo = np.array([p in self.aprendido.modelos for p in self.pais])
+        return ~com_modelo[dominante]
+
+    def relativa_aprendida(self, pai: str, ids: list[str]) -> np.ndarray:
+        """A régua aprendida (#93, ADR-17): o modelo nas faixas que passam pelo portão (`fora_do_aprendido`), a
+        relativa (v2) nas outras, e os rótulos do usuário por cima. NaN em tudo se o pai não tem modelo."""
+        if pai not in self.aprendido.modelos:
+            return np.full(len(ids), np.nan)
+        ap = self.aprendido.relativa(pai, ids)
+        rel = np.where(np.isnan(ap) | self.fora_do_aprendido(ids), self.relativa(pai, ids), ap)
+        return self.aprendido.sobrepor_rotulos(pai, ids, rel)
+
+    def relativa_receita(self, pai: str, ids: list[str]) -> np.ndarray:
+        """A régua do `genero_pai_min`: a relativa (v2) ou, com `REGUA_RECEITAS = "aprendida"`, a aprendida nos
+        pais que têm modelo."""
+        if self.usa_aprendida(pai):
+            return self.relativa_aprendida(pai, ids)
+        return self.relativa(pai, ids)
 
     def relativa_com_maest(self, pai: str, ids: list[str]) -> np.ndarray:
         """A mesma régua com o MAEST (#88, ADR-15): média da régua do Discogs + Jamendo com a da fração do MAEST,

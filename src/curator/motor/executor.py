@@ -10,6 +10,8 @@
 
 `VERSAO_MOTOR` muda quando o significado de um campo da receita muda; a execução guarda a versão (ADR-05).
 v2 (#83): `genero_pai_min` passou a ser a afinidade relativa ao núcleo do gênero (ADR-14), não o maior estilo.
+Com `generos.REGUA_RECEITAS = "aprendida"` (#93, ADR-17; hoje "v2"), `genero_pai_min` usaria a régua aprendida com os
+rótulos do usuário. Isso pede um `VERSAO_MOTOR` novo, e a versão do banco da execução já leva o hash dos rótulos.
 """
 
 import json
@@ -112,6 +114,7 @@ class _Probs:
         self.indice = _indice_rotulos(con)
         self.matrizes = {t: espacos.probabilidades(con, t) for t in espacos.TIPOS_PROBABILIDADE}
         self._afinidades: generos.Afinidades | None = None
+        self.versao_rotulos: str | None = None  # hash dos rótulos, quando a régua aprendida entrou
 
     def de(self, rotulo: str) -> np.ndarray:
         out = np.zeros(len(self.ids), np.float32)
@@ -122,10 +125,12 @@ class _Probs:
         return out
 
     def do_pai(self, pai: str) -> np.ndarray:
-        """Afinidade relativa (#83): 1,0 = tão típica do gênero quanto a faixa mediana do núcleo dele."""
+        """Afinidade relativa (#83, #93): 1,0 = tão típica do gênero quanto a faixa mediana do núcleo dele."""
         if self._afinidades is None:
             self._afinidades = generos.Afinidades(self.con)
-        return self._afinidades.relativa(pai, self.ids).astype(np.float32)
+        if self._afinidades.usa_aprendida(pai):
+            self.versao_rotulos = self._afinidades.aprendido.versao
+        return self._afinidades.relativa_receita(pai, self.ids).astype(np.float32)
 
 
 def _menciona(texto_norm: str, nome_norm: str) -> bool:
@@ -310,4 +315,6 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
         Item(ids[i], round(float(score[i]), 6), {k: round(float(v[i]), 6) for k, v in comps.items()})
         for i in escolhidos
     ]
+    if probs.versao_rotulos:
+        ex.versao_banco = f"{ex.versao_banco}+rotulos:{probs.versao_rotulos}"
     return ex
