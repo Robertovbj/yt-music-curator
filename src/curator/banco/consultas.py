@@ -137,6 +137,11 @@ def estatisticas(con: sqlite3.Connection) -> dict:
         "analisadas_fora_da_biblioteca": um(
             f"SELECT count(*) FROM analises WHERE status = 'ok' AND video_id NOT IN {bib}"
         ),
+        # análises que vieram de outra pessoa (#96); fora da biblioteca, elas são músicas NOVAS para você
+        "analises_importadas": um("SELECT count(*) FROM analises WHERE importacao_id IS NOT NULL"),
+        "importadas_na_biblioteca": um(
+            f"SELECT count(*) FROM analises WHERE importacao_id IS NOT NULL AND video_id IN {bib}"
+        ),
         "playlists_proprias": len(playlists),
         "playlists_ignoradas": um("SELECT count(*) FROM playlists WHERE ignorada = 1"),
         "videos_ignorados": len(ignoradas(con)),

@@ -23,6 +23,7 @@
 - [ADR-13: Recomendações fora da biblioteca](#adr-13-recomendações-fora-da-biblioteca)
 - [ADR-14: Afinidade de gênero-pai (#83)](#adr-14-afinidade-de-gênero-pai-83)
 - [ADR-15: Análises extras e metadados externos (#88)](#adr-15-análises-extras-e-metadados-externos-88)
+- [ADR-16: Compartilhar análises entre pessoas (#96)](#adr-16-compartilhar-análises-entre-pessoas-96)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -623,6 +624,67 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - O mapa de rótulos externos para os pais do Discogs (`generos.pais_de_rotulo`) é uma heurística por palavras.
 - O MAEST custa ~12 s por faixa: a primeira passada na biblioteca inteira leva cerca de 15 h (uma vez só). Ela foi feita em 06/11 com uma opção provisória, `--so-extras`, que saiu na #92: hoje o `curator analisar` completa sozinho, depois da fila, os extras que faltam nas faixas com áudio guardado.
 - Pop continua mal separado do Electronic e do pop japonês em qualquer régua fixa (AUC por artista de 0,848 a 0,875). Para ele, as instruções seguem recomendando perfil-alvo, sementes e estilos específicos até a #93.
+
+---
+
+## ADR-16: Compartilhar análises entre pessoas (#96)
+
+**Contexto:**
+- Baixar e analisar uma biblioteca leva dias: a da #90 levou ~19 h só de download, e a análise do núcleo leva ~7 s por faixa.
+- Dois amigos do usuário querem usar o projeto, e as bibliotecas se sobrepõem.
+- Uma análise depende só do áudio e do analisador, não de quem ouve. Pode ser feita uma vez e passada adiante.
+
+**Decisão:** `curator analises exportar` gera um pacote, e `curator analises importar` traz o de outra pessoa (`banco/compartilhar.py`, migração 019).
+
+1. **O que vai.** Só o que é igual para todo mundo:
+   - os metadados públicos da faixa (título, artistas, álbum, duração, ISRC, explícita, tipo de vídeo, visualizações, data de publicação);
+   - a análise do núcleo (features, vetores, rótulos dos modelos) e os extras da #88;
+   - os metadados externos (Deezer, MusicBrainz).
+2. **O que nunca vai:**
+   - curtidas e a posição nelas, likes e dislikes, playlists;
+   - receitas, planos, recomendações e coletas (as sementes revelam a biblioteca), clusters e projeções;
+   - fila, proxies e saídas (os IPs), config e credenciais;
+   - o áudio e qualquer caminho local (o `fonte_ref` da pasta local sai vazio);
+   - os tempos da máquina e as datas que mostram quando a faixa entrou na biblioteca;
+   - as faixas de playlists ignoradas (#77).
+
+   O esquema do pacote é uma lista fechada de tabelas e colunas (`TABELAS`). Uma coluna nova no banco não vai junto sem alguém pôr ela ali.
+3. **Formato:** um zip com `manifesto.json` (versões, contagens, SHA-256) e `analises.db`, um SQLite só com essas tabelas.
+4. **Importar é tratar dado não confiável.** Antes de gravar qualquer coisa, a importação confere:
+   - o zip (só os dois arquivos, tamanho máximo);
+   - o SHA-256;
+   - o `integrity_check`, com `trusted_schema = OFF`;
+   - o esquema (sem view nem trigger);
+   - os ids, a dimensão de cada vetor contra os rótulos, os valores finitos e as referências entre as tabelas.
+
+   Qualquer falha recusa o pacote inteiro.
+5. **Precedência:**
+   - Só entra análise com a versão do analisador e o hash dos modelos atuais.
+   - Um extra entra só com o hash atual dele e sobre a mesma análise (mesma fonte de áudio).
+   - Uma análise local válida nunca é sobrescrita. Uma local com erro ou desatualizada é trocada, porque seria refeita de qualquer jeito.
+   - Quem estava na fila sai dela.
+   - O mesmo pacote de novo, depois de uma atualização do analisador por exemplo, traz só o que faltava, na mesma importação.
+6. **Importada continua NOVA.**
+   - Conhecida é só curtida ∪ playlist própria (`consultas.BIBLIOTECA`). Ter análise ou estar em `faixas` não conta.
+   - A base do z-score, das réguas de gênero, dos clusters e do mapa é `espacos.da_biblioteca`.
+   - A importação nunca escreve curtida, avaliação nem playlist. Por isso a biblioteca, as recomendações, a régua e as receitas ficam idênticas antes e depois (teste em `tests/test_compartilhar.py`).
+   - O que muda é bom: uma candidata de recomendação já analisada não vai para a fila do modo lento, e uma faixa importada que o usuário curtir depois entra na biblioteca sem download.
+7. **Origem e desfazer.**
+   - Cada linha importada guarda o `importacao_id`. Uma análise refeita aqui volta a ser local sozinha, porque o worker regrava a linha inteira.
+   - `curator analises remover` apaga só o que veio da importação. As faixas da biblioteca que perdem a análise voltam para a fila.
+8. **Escopo e privacidade.**
+   - A lista de faixas do pacote, sozinha, mostra o que a pessoa escuta: é o preço da ideia.
+   - `--so-biblioteca` deixa de fora as candidatas de recomendação analisadas.
+   - As análises importadas só são repassadas com `--com-importadas`, para a origem não se perder.
+9. **Tamanho** (biblioteca real, 07/11):
+   - 3.327 faixas dão 86 MB zipado e 152 MB descompactado, ~26 KB por faixa;
+   - sem os extras, 47 MB;
+   - a exportação leva ~3 s, e a importação num banco vazio ~1 s.
+
+**Alternativas rejeitadas:**
+- **Mandar o backup (#50):** leva o banco inteiro, com curtidas, playlists e receitas.
+- **Exportar em JSON:** os vetores em float32 ficariam ~4× maiores e mais lentos de conferir.
+- **Uma API ou servidor compartilhado:** é infraestrutura demais para um grupo de amigos.
 
 ---
 

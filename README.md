@@ -230,3 +230,25 @@ uv run curator backup restaurar arquivo.zip       # na máquina nova; com dados 
 ```
 
 O zip leva o banco (análises, vetores, receitas, planos, clusters), o `config.toml` e o `hierarquia.toml`. Os modelos Essentia ficam de fora: na máquina nova, `uv run curator modelos baixar`.
+
+### Compartilhar análises com outras pessoas
+
+Analisar uma biblioteca leva dias. Quem já analisou pode passar as análises adiante:
+
+```sh
+uv run curator analises exportar --autor "Seu nome"   # pacote em ~/.local/share/yt-music-curator/exportacoes/
+uv run curator analises importar pacote.zip --seco     # confere e conta, sem gravar
+uv run curator analises importar pacote.zip
+uv run curator analises importadas                     # o que entrou de quem
+uv run curator analises remover 1                      # desfaz uma importação
+```
+
+- **O que vai:** os metadados públicos das faixas, as análises, os extras e os metadados externos.
+- **O que nunca vai:** curtidas, likes e dislikes, playlists, receitas, recomendações, proxies, o áudio e caminhos do seu disco.
+- **Para quem importa:**
+  - as faixas importadas continuam **novas**: não viram curtida nem entram na sua biblioteca;
+  - a análise local sempre vence;
+  - só entra o que foi feito com a mesma versão do analisador (os dois lados precisam de `uv run curator modelos baixar` com o mesmo código).
+- **Tamanho:** o pacote da biblioteca toda tem ~86 MB. Não ponha no repositório.
+
+Detalhes no ADR-16.

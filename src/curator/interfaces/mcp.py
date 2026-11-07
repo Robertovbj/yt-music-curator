@@ -131,7 +131,8 @@ def estatisticas() -> dict:
 def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     """Faixas cujo título, artista ou álbum contém o texto (sem acento/caixa). Devolve video_id para usar como semente.
 
-    `dislike`: o usuário não gosta; nunca use como semente nem sugira. `na_biblioteca`: curtida ou numa playlist dele."""
+    `dislike`: o usuário não gosta; nunca use como semente nem sugira. `na_biblioteca`: curtida ou numa playlist dele.
+    `importada`: a análise veio de outra pessoa (#96); fora da biblioteca, é uma música NOVA para o usuário."""
     con = banco()
     q = normalizar(texto)
     analisadas = set(espacos.analisadas(con))
@@ -151,9 +152,12 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     biblioteca = set(consultas.biblioteca(con))
     dislikes = consultas.com_dislike(con)
     uso = _dados_de_uso(con, achadas)
+    from curator.banco.compartilhar import importadas
+
+    de_fora = importadas(con)
     return [
         {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes,
-         **uso[v]}
+         **({"importada": True} if v in de_fora else {}), **uso[v]}
         for v in achadas
     ]  # fmt: skip
 
