@@ -12,6 +12,12 @@ Modos:
 Sempre fora: faixas com dislike, as próprias sementes e o que já foi recomendado 3 vezes sem reação nos
 últimos 30 dias (#62). Uma recomendação anterior sem reação custa 15% do score a cada vez.
 
+Popularidade e novidade (#87): `popularidade` (alvo 0..1 no percentil das visualizações da biblioteca, como na
+receita) multiplica o score por exp(−peso·dz²/2); `publicadas_desde` deixa só o que foi publicado a partir da data.
+As candidatas não têm esses dados: antes de ordenar, as `estatisticas_top` melhores pelas coletas recebem as
+visualizações e a data (uma chamada por faixa, guardada com validade). Sem o dado, a popularidade custa um desvio e
+a data tira a faixa.
+
 Dislike fora das playlists (#60): o rádio não mostra dislike, então antes de salvar cada música nova da lista
 tem a avaliação conferida no botão de like do player; as que vierem com dislike (ou já curtidas) saem e o
 ranking é refeito. Parecer com o que levou dislike também custa (#61, `fatores_dislike`).
@@ -22,9 +28,10 @@ import json
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Literal
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from curator.banco import consultas
@@ -56,6 +63,10 @@ class Pedido(BaseModel):
     excluir_artistas: list[str] = []
     duracao_s: tuple[int, int] | None = None
     max_por_artista: Annotated[int, Field(ge=1)] | None = None
+    # #87: preferência por popularidade (alvo 0..1 = percentil das visualizações na biblioteca; 1 = as mais
+    # conhecidas, 0 = lado B) e só lançamentos a partir de uma data
+    popularidade: Alvo | None = None
+    publicadas_desde: date | None = None
     # só no modo lento: as novas precisam de análise para isto
     perfil_alvo: dict[str, Alvo] = {}
     generos_preferidos: dict[str, Annotated[float, Field(gt=0, le=10)]] = {}
@@ -70,6 +81,8 @@ class Pedido(BaseModel):
             )
         if self.duracao_s and self.duracao_s[0] > self.duracao_s[1]:
             raise ValueError("duracao_s: mínimo maior que o máximo")
+        if self.popularidade and not 0 <= self.popularidade.alvo <= 1:
+            raise ValueError("popularidade: alvo fora de 0..1 (percentil na biblioteca)")
         return self
 
     def com_padroes(self, cfg: dict) -> Pedido:
@@ -209,6 +222,8 @@ def candidatas(
     proibidos = [normalizar(a) for a in p.excluir_artistas]
     maior = max((a.score for a in agregados.values()), default=1.0) or 1.0
     penalidade = fatores_dislike(con, sorted(agregados), cfg)
+    f_pop = _fatores_popularidade(con, sorted(agregados), p.popularidade)
+    publicadas = _publicadas(con, sorted(agregados)) if p.publicadas_desde else {}
     rk = Ranking([])
     for vid, a in agregados.items():
         m = meta.get(vid)
@@ -235,14 +250,21 @@ def candidatas(
         if p.duracao_s and not (m["duracao_s"] and p.duracao_s[0] <= m["duracao_s"] <= p.duracao_s[1]):
             rk.descartes["duração"] += 1
             continue
+        if p.publicadas_desde and not (
+            publicadas.get(vid) and publicadas[vid] >= p.publicadas_desde.isoformat()
+        ):
+            rk.descartes["publicada antes" if publicadas.get(vid) else "sem data de publicação"] += 1
+            continue
         h = hist.get(vid)
         if _bloqueio_por_repeticao(h, cfg, agora):
             rk.descartes["recomendada demais sem reação"] += 1
             continue
         vezes = h.vezes if h else 0
         f_dislike = penalidade.get(vid, 1.0)
-        score = a.score / maior * (1 - pen) ** vezes * f_dislike
+        score = a.score / maior * (1 - pen) ** vezes * f_dislike * f_pop.get(vid, 1.0)
         comp = {"coleta": round(a.score / maior, 6)} | ({"dislike": f_dislike} if f_dislike < 1 else {})
+        if vid in f_pop:
+            comp["popularidade"] = round(f_pop[vid], 6)
         rk.itens.append(rc.ItemRecomendado(
             vid, round(score, 6), sorted(a.fontes), len(a.sementes), vezes, conhecidas, comp,
         ))  # fmt: skip
@@ -250,6 +272,50 @@ def candidatas(
     for i in rk.itens:
         i.componentes["_principal"] = meta[i.video_id]["principal"]  # removido em `limitar`
     return rk
+
+
+def _fatores_popularidade(con: sqlite3.Connection, ids: list[str], alvo: Alvo | None) -> dict[str, float]:
+    """exp(−peso·dz²/2), dz = (percentil − alvo) ÷ desvio do percentil; sem visualizações, dz = 1 (#87)."""
+    if alvo is None:
+        return {}
+    from curator.motor import popularidade
+
+    pct = popularidade.percentis(con, ids)
+    dz = np.where(np.isnan(pct), 1.0, (pct - alvo.alvo) / popularidade.DESVIO)
+    return {v: float(np.exp(-alvo.peso * d**2 / 2)) for v, d in zip(ids, dz, strict=True)}
+
+
+def _publicadas(con: sqlite3.Connection, ids: list[str]) -> dict[str, str]:
+    out = {}
+    for i in range(0, len(ids), 900):
+        lote = ids[i : i + 900]
+        out |= dict(con.execute(
+            f"SELECT video_id, publicada_em FROM faixas WHERE publicada_em IS NOT NULL "
+            f"AND video_id IN ({','.join('?' * len(lote))})", lote,
+        ).fetchall())  # fmt: skip
+    return out
+
+
+def buscar_estatisticas(
+    con: sqlite3.Connection, cli, p: Pedido, cfg: dict, sementes: list[str], coleta_ids: list[int]
+) -> int:
+    """Visualizações e data de publicação das melhores candidatas, quando o pedido usa uma das duas (#87).
+
+    "Melhores" = o ranking sem popularidade nem data (senão, sem o dado, nenhuma passaria). Novas e, no escopo
+    misturar, as da biblioteca que o rádio trouxe (a biblioteca já tem o dado pelo `sincronizar`)."""
+    if cli is None or not (p.popularidade or p.publicadas_desde):
+        return 0
+    from curator.coleta.sincronizar import estatisticas_de
+
+    base = p.model_copy(update={"popularidade": None, "publicadas_desde": None})
+    top = cfg["recomendacoes"]["estatisticas_top"]
+    ids = [i.video_id for i in candidatas(con, base, cfg, sementes, coleta_ids).itens[:top]]
+    if p.escopo == "misturar":
+        ids += [
+            i.video_id for i in candidatas(con, base, cfg, sementes, coleta_ids, conhecidas=True).itens[:top]
+        ]
+    res = estatisticas_de(con, cli, ids, cfg["metadados"]["estatisticas_ttl_dias"])
+    return res.contagens.get("buscadas", 0)
 
 
 def limitar(
@@ -378,6 +444,7 @@ def recomendar(
     p = pedido.com_padroes(cfg)
     sementes = resolver_sementes(con, p.faixas, p.playlist, p.cluster, p.artista, p.max_sementes)
     coleta_ids = coletar(con, cli, dz, p, cfg, sementes)
+    buscar_estatisticas(con, cli, p, cfg, sementes, coleta_ids)
     if p.modo == "lento":
         from curator.motor import lento
 

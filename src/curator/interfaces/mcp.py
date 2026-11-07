@@ -64,6 +64,11 @@ use o que você sabe dos artistas e as outras_visoes (MAEST, Rapping/Singing do 
 Deezer) para subir ou descer o limite (é a receita que guarda o número, então o resultado continua reprodutível). Pedido "só com vocal"/"sem lo-fi":
 filtros.max.instrumental 0,5. Pop e Electronic quase não se separam pelo áudio (estes modelos chamam a produção
 pop de Electronic): para eles prefira perfil_alvo, sementes e estilos específicos a genero_pai_min.
+POPULARIDADE (visualizações de todo o YouTube, não as do usuário): `popularidade` é o percentil na biblioteca, de
+0 (lado B) a 1 (as mais vistas). Na receita, vale em perfil_alvo e em filtros.min/max, como uma feature. Nas
+recomendações, use o campo `popularidade` {"alvo"} e `publicadas_desde` (lançamentos). "Só a versão de estúdio",
+"sem clipe", "sem cover" → filtros.tipos_video ["faixa"]. Veja a cobertura em descrever_vocabulario("features"):
+sem dados, ofereça `curator sincronizar` em vez de usar.
 """
 
 
@@ -145,10 +150,32 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     meta = _faixas(con, achadas)
     biblioteca = set(consultas.biblioteca(con))
     dislikes = consultas.com_dislike(con)
+    uso = _dados_de_uso(con, achadas)
     return [
-        {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes}
+        {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes,
+         **uso[v]}
         for v in achadas
-    ]
+    ]  # fmt: skip
+
+
+def _dados_de_uso(con, ids: list[str]) -> dict[str, dict]:
+    """Tipo do vídeo, visualizações, percentil na biblioteca e data de publicação (#85/#87), só o que existir."""
+    from curator.motor import popularidade
+
+    pct = popularidade.percentis(con, ids)
+    tipo = popularidade.tipos(con, ids)
+    out = {v: {} for v in ids}
+    for r in con.execute(
+        f"SELECT video_id, visualizacoes, publicada_em FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})",
+        ids,
+    ):
+        out[r["video_id"]] = {k: v for k, v in {
+            "tipo_video": tipo[r["video_id"]], "visualizacoes": r["visualizacoes"], "publicada_em": r["publicada_em"],
+        }.items() if v is not None}  # fmt: skip
+    for v, p in zip(ids, pct, strict=True):
+        if not np.isnan(p):
+            out[v]["popularidade"] = round(float(p), 3)
+    return out
 
 
 def buscar_artistas(texto: str, limite: int = 20) -> list[dict]:
@@ -201,7 +228,14 @@ def descrever_vocabulario(
                 continue
             out.append({"feature": c, **({"p10": round(float(np.percentile(x, 10)), 3), "mediana": round(float(np.median(x)), 3),
                                           "p90": round(float(np.percentile(x, 90)), 3)} if len(x) else {})})  # fmt: skip
-        return {"grupo": grupo, "faixas_analisadas": len(esc.ids), "itens": out}
+        from curator.motor import popularidade
+
+        if not f or f in "popularidade":
+            out.append({"feature": "popularidade", "escala": "percentil das visualizações na biblioteca (0 = lado B, "
+                        "1 = as mais vistas; p10/mediana/p90 = 0,1/0,5/0,9 por construção)",
+                        "cobertura": popularidade.cobertura(con)})  # fmt: skip
+        return {"grupo": grupo, "faixas_analisadas": len(esc.ids), "itens": out,
+                "tipos_video": popularidade.TIPOS_VIDEO}  # fmt: skip
     if grupo in ("generos_pai", "estilos"):
         d = espacos.probabilidades(con, "discogs400")
         dominantes = [d.colunas[int(np.argmax(row))] for row in d.X] if len(d.ids) else []
@@ -619,14 +653,19 @@ def recomendar_novas(
     excluir_artistas: list[str] | None = None,
     perfil_alvo: dict[str, Any] | None = None,
     generos_preferidos: dict[str, float] | None = None,
+    popularidade: dict[str, float] | None = None,
+    publicadas_desde: str | None = None,
     pedido: str | None = None,
 ) -> dict:
     """Recomenda SÓ músicas novas (fora da biblioteca) parecidas com as sementes: faixas (video_ids de
     buscar_faixas), uma playlist, um cluster ou um artista. `modo` é obrigatório: se o usuário não disse rápido
-    ou lento, PERGUNTE antes. perfil_alvo/generos_preferidos (como na receita) só no modo lento."""
+    ou lento, PERGUNTE antes. perfil_alvo/generos_preferidos (como na receita) só no modo lento.
+    `popularidade` {"alvo": 0..1, "peso"}: 1 = as mais vistas, 0 = lado B (percentil das visualizações na
+    biblioteca). `publicadas_desde` "AAAA-MM-DD": só lançamentos a partir da data. Os dois valem nos dois modos."""
     return _recomendar("novas", modo, pedido, faixas=faixas, playlist=playlist, cluster=cluster, artista=artista,
                        tamanho=tamanho, excluir_artistas=excluir_artistas, perfil_alvo=perfil_alvo,
-                       generos_preferidos=generos_preferidos)  # fmt: skip
+                       generos_preferidos=generos_preferidos, popularidade=popularidade,
+                       publicadas_desde=publicadas_desde)  # fmt: skip
 
 
 def recomendar_misturando_curtidas(
@@ -640,13 +679,17 @@ def recomendar_misturando_curtidas(
     excluir_artistas: list[str] | None = None,
     perfil_alvo: dict[str, Any] | None = None,
     generos_preferidos: dict[str, float] | None = None,
+    popularidade: dict[str, float] | None = None,
+    publicadas_desde: str | None = None,
     pedido: str | None = None,
 ) -> dict:
     """Mistura músicas novas com as da biblioteca (proporcao_novas = fração de novas). Use SÓ quando o usuário
-    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE."""
+    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE. `popularidade` e
+    `publicadas_desde` como em recomendar_novas."""
     return _recomendar("misturar", modo, pedido, proporcao_novas=proporcao_novas, faixas=faixas, playlist=playlist,
                        cluster=cluster, artista=artista, tamanho=tamanho, excluir_artistas=excluir_artistas,
-                       perfil_alvo=perfil_alvo, generos_preferidos=generos_preferidos)  # fmt: skip
+                       perfil_alvo=perfil_alvo, generos_preferidos=generos_preferidos, popularidade=popularidade,
+                       publicadas_desde=publicadas_desde)  # fmt: skip
 
 
 def concluir_recomendacao(recomendacao_id: int, parcial: bool = False) -> dict:

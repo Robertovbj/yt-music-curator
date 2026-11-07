@@ -142,6 +142,11 @@ Nomes de artistas, gêneros, features e playlists são conferidos com o banco; u
 
 O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, igual para todos os gêneros. 1,0 é tão típico do gênero quanto a faixa mediana do núcleo dele na sua biblioteca, o conjunto de faixas que os dois modelos põem nesse gênero em primeiro lugar. O `examinar_genero` mostra também a mesma régua com o MAEST, que separa melhor rap e Electronic mas joga rock japonês no Pop. Por isso ela fica ao lado e não entra na receita (ADR-15, #93). Os níveis são 0,7 amplo, 0,8 normal e 1,0 estrito. Pelo MCP, `examinar_genero` mostra as faixas logo acima e logo abaixo do corte. Pop e Electronic quase não se separam pelo áudio. A decisão está no ADR-14, e a medição em `docs/avaliacao.md`.
 
+Popularidade e tipo do vídeo (#87) vêm do `sincronizar`:
+- **`popularidade`:** o percentil das visualizações de todo o YouTube na sua biblioteca, em escala log, de 0 (lado B) a 1 (as mais vistas). Vale em `perfil_alvo` e em `filtros.min`/`max`, como uma feature.
+- **`filtros.tipos_video`:** `["faixa"]` deixa só as faixas de áudio, sem clipes (`clipe`) nem vídeos de usuário (`usuario`). A faixa sem essa informação fica.
+- **Nas recomendações:** `--popularidade 0..1` e `--desde AAAA-MM-DD` (só lançamentos). Antes de ordenar, as melhores candidatas recebem as visualizações e a data.
+
 ## Desenvolvimento
 
 ```sh

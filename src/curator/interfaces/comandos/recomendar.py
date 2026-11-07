@@ -54,6 +54,13 @@ O_PERMITIR = typer.Option(
     help="Com --adicionar-em: aceita pôr músicas que você não conhece nessa playlist.",
 )
 O_PEDIDO = typer.Option(None, "--pedido", help="A frase original do pedido (fica no histórico).")
+O_POPULARIDADE = typer.Option(
+    None, "--popularidade", min=0.0, max=1.0,
+    help="Preferência por popularidade (#87): 1 = as mais vistas, 0 = lado B (percentil na sua biblioteca).",
+)  # fmt: skip
+O_DESDE = typer.Option(
+    None, "--desde", help="Só publicadas a partir desta data (AAAA-MM-DD; lançamentos, #87)."
+)
 O_SIM = typer.Option(False, "--sim", help="Não pergunta (para scripts).")
 O_JSON = typer.Option(False, "--json", help="Saída em JSON.")
 
@@ -92,6 +99,8 @@ def _resumo(p, criar: bool, nome: str | None, em: str | None, permitir: bool) ->
     return (
         f"recomendação {modo} · {escopo}\n  sementes: {', '.join(partes)}\n"
         f"  fontes: {', '.join(p.fontes)} · tamanho {p.tamanho}\n  destino: {destino}"
+        + (f"\n  popularidade: alvo {p.popularidade.alvo:.2f} (1 = as mais vistas)" if p.popularidade else "")
+        + (f"\n  só publicadas desde {p.publicadas_desde:%d/%m/%Y}" if p.publicadas_desde else "")
     )
 
 
@@ -138,7 +147,8 @@ def _plano(con, rid: int, criar: bool, nome: str | None, em: str | None, permiti
 
 def _recomendar(modo: str, faixa, playlist, cluster, artista, tamanho, misturar_curtidas, proporcao_novas, fonte,
                 excluir_artista, criar_playlist, nome, adicionar_em, permitir_novas, pedido, sim, como_json,
-                spec: Path | None = None, aguardar: bool = False) -> None:  # fmt: skip
+                spec: Path | None = None, aguardar: bool = False, popularidade: float | None = None,
+                desde: str | None = None) -> None:  # fmt: skip
     from curator.coleta.candidatas import SementeInvalida
     from curator.motor import recomendar as rr
 
@@ -153,6 +163,7 @@ def _recomendar(modo: str, faixa, playlist, cluster, artista, tamanho, misturar_
         "playlist": playlist, "cluster": cluster, "artista": artista, "tamanho": tamanho, "fontes": list(fonte) or None,
         "excluir_artistas": list(excluir_artista) or dados.get("excluir_artistas"),
         "proporcao_novas": proporcao_novas if misturar_curtidas else None,
+        "popularidade": {"alvo": popularidade} if popularidade is not None else None, "publicadas_desde": desde,
     }.items() if v is not None})  # fmt: skip
     try:
         p = rr.Pedido.model_validate(dados)
@@ -194,10 +205,12 @@ def rapido(
     proporcao_novas: float = O_PROPORCAO, fonte: list[str] = O_FONTE, excluir_artista: list[str] = O_EXCLUIR,
     criar_playlist: bool = O_CRIAR, nome: str | None = O_NOME, adicionar_em: str | None = O_EM,
     permitir_novas: bool = O_PERMITIR, pedido: str | None = O_PEDIDO, sim: bool = O_SIM, como_json: bool = O_JSON,
+    popularidade: float | None = O_POPULARIDADE, desde: str | None = O_DESDE,
 ) -> None:  # fmt: skip
     """Sem baixar nada: ordena pelo que o rádio do YT (e o Deezer) trazem para as sementes."""
     _recomendar("rapido", faixa, playlist, cluster, artista, tamanho, misturar_curtidas, proporcao_novas, fonte,
-                excluir_artista, criar_playlist, nome, adicionar_em, permitir_novas, pedido, sim, como_json)  # fmt: skip
+                excluir_artista, criar_playlist, nome, adicionar_em, permitir_novas, pedido, sim, como_json,
+                popularidade=popularidade, desde=desde)  # fmt: skip
 
 
 @recomendar_app.command("lento")
@@ -209,11 +222,12 @@ def lento_cmd(
     permitir_novas: bool = O_PERMITIR, pedido: str | None = O_PEDIDO, sim: bool = O_SIM, como_json: bool = O_JSON,
     spec: Path | None = typer.Option(None, "--spec", help="JSON com perfil_alvo/generos_preferidos (como na receita)."),
     aguardar: bool = typer.Option(False, "--aguardar", help="Espera as análises terminarem (o worker precisa rodar)."),
+    popularidade: float | None = O_POPULARIDADE, desde: str | None = O_DESDE,
 ) -> None:  # fmt: skip
     """Baixa e analisa as melhores candidatas (na fila, depois da biblioteca) e ordena com o motor."""
     _recomendar("lento", faixa, playlist, cluster, artista, tamanho, misturar_curtidas, proporcao_novas, fonte,
                 excluir_artista, criar_playlist, nome, adicionar_em, permitir_novas, pedido, sim, como_json, spec,
-                aguardar)  # fmt: skip
+                aguardar, popularidade, desde)  # fmt: skip
 
 
 # ------------------------------------------------------------------ histórico

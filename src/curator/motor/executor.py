@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from curator.banco import consultas
-from curator.motor import espacos, generos
-from curator.motor.receita import Receita, resolver_playlist, validar
+from curator.motor import espacos, generos, popularidade
+from curator.motor.receita import POPULARIDADE, Receita, resolver_playlist, validar
 from curator.texto import normalizar
 
 VERSAO_MOTOR = "2"
@@ -162,6 +162,12 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     col = {c: i for i, c in enumerate(esc.colunas)}
     probs = _Probs(con, cand)
     f = r.filtros
+    usa_pop = POPULARIDADE in {*f.min, *f.max, *r.perfil_alvo}
+    # percentil das visualizações na biblioteca (#87): NaN sem o dado, como uma feature ausente
+    pop = popularidade.percentis(con, cand) if usa_pop else None
+
+    def coluna(nome: str) -> np.ndarray:
+        return pop if nome == POPULARIDADE else esc.X[:, col[nome]]
 
     # 2. filtros duros
     manter = np.ones(len(cand), bool)
@@ -197,6 +203,9 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
             "duração",
             np.array([meta[v]["duracao_s"] is not None and lo <= meta[v]["duracao_s"] <= hi for v in cand]),
         )
+    if f.tipos_video:
+        aceitos, tipo = set(f.tipos_video), popularidade.tipos(con, cand)
+        aplicar("tipo de vídeo", np.array([tipo[v] is None or tipo[v] in aceitos for v in cand]))
     limites = dict(f.min)
     tetos = dict(f.max)
     if f.bpm:
@@ -205,10 +214,10 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
             min(tetos.get("bpm", np.inf), f.bpm[1]),
         )
     for nome, lo in limites.items():
-        x = esc.X[:, col[nome]]
+        x = coluna(nome)
         aplicar(f"{nome} < {lo}", ~np.isnan(x) & (x >= lo))
     for nome, hi in tetos.items():
-        x = esc.X[:, col[nome]]
+        x = coluna(nome)
         aplicar(f"{nome} > {hi}", ~np.isnan(x) & (x <= hi))
     if f.generos_min:
         ok = np.zeros(len(cand), bool)
@@ -233,11 +242,9 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     if r.perfil_alvo:
         soma_w, d2 = 0.0, np.zeros(len(idx))
         for nome, alvo in r.perfil_alvo.items():
-            j = col[nome]
-            x = esc.X[idx, j]
-            dz = np.where(
-                np.isnan(x), 1.0, (x - alvo.alvo) / desvio[j]
-            )  # feature ausente: 1 desvio de penalidade
+            x = coluna(nome)[idx]
+            d = popularidade.DESVIO if nome == POPULARIDADE else desvio[col[nome]]
+            dz = np.where(np.isnan(x), 1.0, (x - alvo.alvo) / d)  # feature ausente: 1 desvio de penalidade
             d2 += alvo.peso * dz**2
             soma_w += alvo.peso
         comps["perfil"], pesos["perfil"] = np.exp(-d2 / (2 * soma_w)), r.pesos.perfil
