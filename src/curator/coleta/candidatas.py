@@ -112,7 +112,7 @@ def resolver_sementes(
     dislikes = consultas.bloqueadas(con)
     out = [v for v in faixas or [] if v not in dislikes]
     if rejeitadas := [v for v in faixas or [] if v in dislikes]:
-        log.info("sementes com dislike ou de playlist ignorada descartadas: %s", rejeitadas)
+        log.info("sementes com dislike ou na lista negra descartadas: %s", rejeitadas)
     if playlist:
         out += sementes_de_playlist(con, playlist, k)
     if cluster is not None:

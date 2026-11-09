@@ -41,11 +41,17 @@ uv run curator hierarquia verificar                 # agregadoras contêm todas 
 uv run curator playlists ignorar "Valorant Plays"   # aceita várias; `considerar` desfaz
 uv run curator playlists ignoradas
 
+# faixas que não são música para você (meme, cover de piada): fora de tudo, continuam curtidas no YouTube
+uv run curator faixas ignorar VIDEO_ID --motivo "meme"   # aceita várias; `considerar` desfaz
+uv run curator faixas ignoradas
+
 # 4. visão geral
 uv run curator estatisticas
 ```
 
 Uma playlist ignorada some das listagens, do mapa, das receitas, da classificação, das recomendações e do MCP, e nenhum plano mexe nela. Os vídeos que só estão em playlists ignoradas também saem de tudo, mesmo curtidos, e não vão para a fila de análise; quem também está numa playlist normal continua valendo por ela. Análises já feitas ficam guardadas.
+
+Uma faixa ignorada (`curator faixas ignorar`) sai de tudo do mesmo jeito, mesmo que esteja numa playlist normal, e também dos rótulos de gênero e do pacote compartilhado. No YouTube nada muda, e o `sincronizar` não desfaz a marcação.
 
 A sincronização é total: uma música removida de uma playlist no YouTube Music some do banco. Uma playlist com a mesma contagem, sincronizada há menos de 24 h, não é baixada de novo (`--forcar` ignora esses caches).
 
@@ -146,14 +152,15 @@ O gênero-pai (`"genero_pai_min": {"Hip Hop": 0.8}`) usa uma régua relativa, ig
 
 ```sh
 uv run curator generos importar-gabarito gabarito.toml   # um gabarito pessoal: artistas e faixas por gênero
-uv run curator generos rotular Rock                       # pergunta as faixas mais duvidosas, uma a uma
+uv run curator generos rotular Rock                       # só se quiser: pergunta as mais duvidosas, uma a uma
 uv run curator generos rotulo VIDEO_ID Rock nao           # uma faixa só (sim, nao ou apagar)
 uv run curator generos status --validar                   # rótulos por gênero e a precisão, deixando o artista de fora
 ```
 
-- **Pelo MCP:** a IA mostra as faixas mais duvidosas (`faixas_para_rotular`) e grava a SUA resposta (`rotular_genero`).
+- **Pelo MCP, no uso:** quando você diz numa conversa que uma faixa é ou não é de um gênero, a IA grava a SUA resposta (`rotular_genero`). Ela não propõe sessões de rotular.
 - **Origem:** os rótulos nunca vêm das playlists.
-- **Onde aparece:** a afinidade aprendida aparece ao lado no `examinar_genero`. As receitas seguem a régua do Discogs até os rótulos cobrirem o pop japonês e as trilhas (ADR-17).
+- **Guarda (#101):** o modelo só opina nas faixas parecidas com alguma faixa rotulada. Nas outras, como as trilhas de jogo, vale a régua do Discogs.
+- **Onde aparece:** nas receitas, a régua aprendida vale no Hip Hop e no Pop. Rock e Electronic seguem na régua do Discogs, e o `examinar_genero` mostra as duas lado a lado (ADR-17).
 
 Popularidade e tipo do vídeo (#87) vêm do `sincronizar`:
 - **`popularidade`:** o percentil das visualizações de todo o YouTube na sua biblioteca, em escala log, de 0 (lado B) a 1 (as mais vistas). Vale em `perfil_alvo` e em `filtros.min`/`max`, como uma feature.

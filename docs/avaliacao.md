@@ -286,3 +286,52 @@ O ADR-17 fica com o portão.
 O gabarito só tem rock japonês, então o modelo aprendeu "produção japonesa de anime = Rock". As primeiras perguntas do aprendizado ativo (`curator generos rotular Rock` / `Pop`) são exatamente essas faixas, com a v2 em 0,1 e a aprendida em 1,0 no Rock, ou o contrário no Pop.
 
 **Custo:** montar os quatro modelos leva ~0,3 s. Eles são refeitos quando mudam os rótulos ou as análises.
+
+## Guarda e decisão por gênero (#101)
+
+**Data:** 2026-11-09 · **Decisão:** ADR-17 (itens 5 e 8) · **Script:** `contrib/avaliacao/genero_aprendido.py`.
+
+**Como foi medido:**
+- **Base:** cópia do banco real de 09/11, com 3.319 faixas analisadas na biblioteca, 2.751 delas sem rótulo.
+- **Rótulos:**
+  - o gabarito ampliado com o J-pop no Pop e o pop eletrônico no Pop e no Electronic;
+  - as 64 faixas de rap uma a uma;
+  - uns 40 rótulos dados pela conversa. Esses são os mais difíceis, porque o aprendizado ativo pergunta onde as réguas discordam.
+- **Validação:** com o artista inteiro de fora, em 10 dobras. O modelo e a guarda de cada dobra só conhecem as faixas rotuladas dos outros artistas.
+- **Guarda:** 5 vizinhas e corte no percentil 5 das rotuladas. O corte ficou em 0,371.
+- **Segmentos:** "trilhas" é uma lista de 13 artistas de trilha de jogo, com 1.566 faixas. "Japonesas" são as faixas com kana ou kanji no título ou no artista, fora as trilhas.
+
+**Quem o modelo julga.** Ele julga 39% das faixas sem rótulo: 10% das trilhas, 87% das japonesas e 72% das outras. Nas outras, vale a v2.
+
+AUC, e revocação / falsos positivos no corte 0,8:
+
+| Gênero | v2 | Aprendida (só o modelo) | Aprendida com a guarda |
+|---|---|---|---|
+| Hip Hop por artista (52 × 505) | 0,998 · 0,43 / 0,00 | 0,992 · 0,86 / 0,02 | 0,995 · 0,86 / 0,01 |
+| Rap faixa a faixa (43 × 21) | 0,946 · 0,91 / 0,14 | 0,997 · 1,00 / 0,10 | **0,990 · 0,95 / 0,10** |
+| Pop por artista (287 × 264) | 0,890 · 0,36 / 0,04 | 0,979 · 0,84 / 0,03 | **0,977 · 0,82 / 0,03** |
+| Pop, rótulos da conversa (10 × 6) | 0,767 · 0,10 / 0,00 | 0,367 · 0,40 / 0,83 | 0,600 · 0,30 / 0,33 |
+| Rock por artista (153 × 401) | 0,993 · 0,84 / 0,01 | 0,992 · 0,87 / 0,02 | 0,992 · 0,88 / 0,02 |
+| Rock, rótulos da conversa (11 × 9) | 0,657 · 0,45 / 0,11 | 0,374 · 0,36 / 0,56 | 0,687 · 0,55 / 0,22 |
+| Rock japonês ≥ 0,8 (46 faixas) | 0,87 | 0,80 | 0,80 |
+| Electronic por artista (97 × 450) | 0,930 · 0,85 / 0,12 | 0,939 · 0,70 / 0,06 | 0,938 · 0,71 / 0,06 |
+
+Faixas sem rótulo com nota ≥ 0,8, no total e entre as trilhas:
+
+| Gênero | v2 | Aprendida (só o modelo) | Aprendida com a guarda |
+|---|---|---|---|
+| Hip Hop | 15 (0 trilhas) | 390 (288) | 59 (1) |
+| Pop | 264 (1) | 560 (28) | 503 (7) |
+| Rock | 239 (52) | 276 (65) | 260 (55) |
+| Electronic | 599 (281) | 1.194 (974) | 496 (310) |
+
+- **Critérios da #101:**
+  - as trilhas no Hip Hop aprendido caem de 288 para 1, e 87% das japonesas continuam julgadas;
+  - os critérios da #93 continuam valendo com a guarda: rap faixa a faixa com AUC de 0,990, Pop com 0,977 e 80% do rock japonês ≥ 0,8.
+- **O que mudaria no 0,8**, entre as faixas sem rótulo:
+  - **Hip Hop:** entram 47, quase todas lofi (Ambition, the bootleg boy). Isso segue a regra do usuário de que lofi conta como Hip Hop. Saem "Heat Waves", "Lalala" e um cover de piada.
+  - **Pop:** entram 252, quase todas pop ocidental (Hayd, Mark Ronson, Lauv). Saem 13, entre elas músicas de personagem do K-On! e "Hikaru Nara".
+  - **Rock:** entram 29 e saem 8.
+  - **Electronic:** entram trilhas (HOYO-MiX, Lorien Testard) e saem 149, entre elas pop de idol e Katy Perry.
+- **Decisão do usuário:** a régua aprendida entra nas receitas no Hip Hop e no Pop (motor v3). Rock e Electronic seguem na v2.
+- **Custo:** a avaliação inteira, com os 4 modelos, as 10 dobras e a guarda, leva ~5 s.

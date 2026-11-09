@@ -58,11 +58,13 @@ Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1. Estilos, humores e
 modelos (0..1, cada uma isolada; um estilo raramente passa de 0,5). genero_pai_min é outra régua: a afinidade
 RELATIVA ao núcleo do gênero na biblioteca (1,0 = tão típica quanto a faixa mediana do núcleo; 0,7 amplo, 0,8
 normal, 1,0 estrito), igual para todos os gêneros. O examinar_genero mostra ao lado a afinidade_com_maest (ADR-15) e,
-nos gêneros que o usuário rotulou, a afinidade_aprendida com os rótulos DELE (ADR-17). A receita NÃO usa as duas:
-compare na fronteira, e um rotulo_do_usuario vale mais que qualquer régua.
-RÓTULOS DE GÊNERO (#93): quando o usuário quiser ensinar o que ele chama de um gênero, ou quando a fronteira estiver
-ruim, use faixas_para_rotular(pai) e PERGUNTE a ele, faixa a faixa, se é do gênero. Grave com rotular_genero SÓ a
-resposta dele: nunca rotule pelo que você acha, nem a partir de uma playlist.
+nos gêneros que o usuário rotulou, a afinidade_aprendida com os rótulos DELE (ADR-17). A receita usa a v2, salvo nos
+gêneros em que ele adotou a aprendida (regua.aprendida.na_receita): compare na fronteira, e um rotulo_do_usuario vale
+mais que qualquer régua. aprendida_nao_julga = o modelo dele não opina naquela faixa (longe do que foi rotulado).
+RÓTULOS DE GÊNERO (#93, #101): NÃO proponha sessões de rotular faixa a faixa (o usuário não quer). Os rótulos nascem
+no uso: quando ele disser, vendo uma playlist ou a fronteira, que uma faixa é ou não é de um gênero ("isso não é
+rock"), grave com rotular_genero. SÓ a resposta dele: nunca rotule pelo que você acha, nem a partir de uma playlist.
+faixas_para_rotular só se ELE pedir para ensinar um gênero.
 Antes de fixar o limite, chame examinar_genero(pai, limite) e olhe as faixas logo acima e logo abaixo do corte:
 use o que você sabe dos artistas e as outras_visoes (MAEST, Rapping/Singing do YAMNet, gêneros do MusicBrainz e do
 Deezer) para subir ou descer o limite (é a receita que guarda o número, então o resultado continua reprodutível). Pedido "só com vocal"/"sem lo-fi":
@@ -73,6 +75,8 @@ POPULARIDADE (visualizações de todo o YouTube, não as do usuário): `populari
 recomendações, use o campo `popularidade` {"alvo"} e `publicadas_desde` (lançamentos). "Só a versão de estúdio",
 "sem clipe", "sem cover" → filtros.tipos_video ["faixa"]. Veja a cobertura em descrever_vocabulario("features"):
 sem dados, ofereça `curator sincronizar` em vez de usar.
+FAIXAS IGNORADAS (#100): se o usuário disser que uma faixa não conta ("é meme", "desconsidere", "não é música"),
+use ignorar_faixa(video_id, motivo) com as palavras dele; desfazer=True volta atrás. NUNCA ignore por conta própria.
 """
 
 
@@ -318,8 +322,18 @@ def examinar_genero(
     corte = sum(1 for i in ordem if rel[i] >= limite)
     esc = espacos.escalares(con)
     j = esc.colunas.index("instrumental") if "instrumental" in esc.colunas else None
-    meta = _faixas(con, [ids[i] for i in ordem[max(0, corte - n) : corte + n]])
+    vistos = [ids[i] for i in ordem[max(0, corte - n) : corte + n]]
+    meta = _faixas(con, vistos)
     visoes = generos.OutrasVisoes(con)
+    # onde o modelo aprendido não opina (portão ou guarda, #101) e a régua aprendida repete a v2
+    nao_julga: dict[str, str] = {}
+    if pai in afin.aprendido.modelos and vistos:
+        portao, dentro = afin.fora_do_aprendido(vistos), afin.aprendido.dentro_da_guarda(vistos)
+        for v, p_, d in zip(vistos, portao, dentro, strict=True):
+            if p_:
+                nao_julga[v] = "a v2 põe a faixa num gênero sem rótulos (portão): vale a v2"
+            elif not d:
+                nao_julga[v] = "longe de tudo o que foi rotulado (guarda): vale a v2"
 
     def item(i: int) -> dict:
         x = esc.X[esc.indice[ids[i]], j] if j is not None and ids[i] in esc.indice else float("nan")
@@ -329,6 +343,8 @@ def examinar_genero(
             out[nome_outra] = round(float(outra[i]), 3)
         if (r := afin.aprendido.rotulo(pai, ids[i])) is not None:
             out["rotulo_do_usuario"] = "sim" if r else "não"
+        elif ids[i] in nao_julga:
+            out["aprendida_nao_julga"] = nao_julga[ids[i]]
         if tem_m[i]:
             out["afinidade_com_maest"] = round(float(rel_m[i]), 3)
         if v := visoes.da_faixa(ids[i], pai):
@@ -356,9 +372,9 @@ def _regua(afin, pai: str) -> dict:
 
 
 def faixas_para_rotular(pai: str, quantas: int = 10) -> dict:
-    """As faixas sem rótulo do gênero em que a resposta do usuário mais ensina: primeiro as que as réguas põem de
-    lados opostos do corte 0,8, depois as perto do corte (no máximo 2 por artista). PERGUNTE ao usuário, uma a uma,
-    se a faixa é do gênero, e grave a resposta com rotular_genero. Não responda por ele."""
+    """SÓ quando o usuário pedir para ensinar um gênero: as faixas sem rótulo em que a resposta dele mais ensina
+    (primeiro as que as réguas põem de lados opostos do corte 0,8, depois as perto do corte; no máximo 2 por
+    artista). Pergunte e grave a resposta com rotular_genero. Não responda por ele nem proponha sessões."""
     from curator.motor import aprendido
 
     con = banco()
@@ -383,6 +399,21 @@ def rotular_genero(video_id: str, pai: str, pertence: bool | None) -> dict:
         return {"erros": [f"faixa {video_id} não está no banco"]}
     aprendido.rotular(con, video_id, pai, pertence, "mcp")
     return {"ok": True, "video_id": video_id, "pai": pai, "pertence": pertence}
+
+
+def ignorar_faixa(video_id: str, motivo: str | None = None, desfazer: bool = False) -> dict:
+    """SÓ quando o USUÁRIO pedir para desconsiderar uma faixa (meme, cover de piada, não é música): ela sai de tudo
+    (biblioteca, receitas, classificação, clusters, mapa, recomendações, buscas, rótulos de gênero), mas continua
+    curtida no YouTube. `desfazer=True` devolve a faixa ao normal. Nunca ignore por conta própria."""
+    con = banco()
+    if not con.execute("SELECT 1 FROM faixas WHERE video_id = ?", (video_id,)).fetchone():
+        return {"erros": [f"faixa {video_id} não está no banco"]}
+    if desfazer:
+        r = consultas.considerar_faixas(con, [video_id])
+        return {"ok": True, "video_id": video_id, "ignorada": video_id in consultas.ignoradas(con),
+                "estava_ignorada": bool(r["consideradas"])}  # fmt: skip
+    r = consultas.ignorar_faixas(con, [video_id], motivo)
+    return {"ok": True, "video_id": video_id, "ignorada": True, "ja_estava": bool(r["ja_estavam"])}
 
 
 def exemplos_de_receitas() -> list[dict]:
@@ -799,7 +830,7 @@ def faltantes_nas_agregadoras() -> dict:
 
 FERRAMENTAS = [
     arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario, examinar_genero,
-    faixas_para_rotular, rotular_genero,
+    faixas_para_rotular, rotular_genero, ignorar_faixa,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
     sugerir_playlists_gerais, criar_plano_das_gerais, sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
     criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,

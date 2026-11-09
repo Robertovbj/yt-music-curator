@@ -102,7 +102,7 @@ def test_executor_usa_a_regua_relativa_e_registra_a_versao(con):
         diversidade={"max_por_artista": None},
     )
     e = executar(con, r)
-    assert "misto" not in e.ids and len(e.ids) == 12 and e.versao_motor == VERSAO_MOTOR == "2"
+    assert "misto" not in e.ids and len(e.ids) == 12 and e.versao_motor == VERSAO_MOTOR == "3"
     assert e.descartes["gênero-pai abaixo do mínimo"] == 1
 
 
@@ -119,7 +119,7 @@ def test_execucao_salva_guarda_a_versao_do_motor(con):
         faixa(con, f"rap{i:02d}", so({0: 0.6, 9: 0.1}))
     receitas.salvar(con, Receita(nome="Rap", filtros={"genero_pai_min": {"Poucos": 0.8}}), "rap")
     receitas.executar_e_registrar(con, "Rap")
-    assert [h["versao_motor"] for h in receitas.execucoes(con, "Rap")] == ["2"]
+    assert [h["versao_motor"] for h in receitas.execucoes(con, "Rap")] == ["3"]
 
 
 MAEST = ["Poucos---Unico", "Muitos---E0", "Outro---X"]
