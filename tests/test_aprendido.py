@@ -53,9 +53,15 @@ def test_so_tem_modelo_quem_tem_rotulos_suficientes(con):
 def test_a_aprendida_poe_o_rock_disfarcado_no_rock_e_a_v2_nao(con):
     afin = generos.Afinidades(con)
     assert (afin.relativa("Rock", DISFARCADAS) < 0.8).all()
-    assert (afin.relativa_aprendida("Rock", DISFARCADAS) >= 0.8).all()
+    assert (afin.aprendido.relativa("Rock", DISFARCADAS) >= 0.8).all()  # o modelo, sem portão nem guarda
+    # a guarda (#101) corta no percentil 5 das rotuladas: a disfarçada mais longe de todas fica com a v2
+    dentro = afin.aprendido.dentro_da_guarda(DISFARCADAS)
+    assert dentro.sum() == 5 and not dentro[DISFARCADAS.index("rock29")]
+    rel = afin.relativa_aprendida("Rock", DISFARCADAS)
+    assert (rel[dentro] >= 0.8).all() and rel[~dentro] == afin.relativa("Rock", ["rock29"])
     assert (afin.relativa_aprendida("Rock", ["ambient25", "rap25"]) < 0.5).all()
-    assert (afin.relativa_aprendida("Electronic", DISFARCADAS) < 0.5).all()  # o Discogs dizia Electronic
+    # o Discogs dizia Electronic; nas que o modelo julga, deixa de dizer
+    assert (afin.relativa_aprendida("Electronic", DISFARCADAS)[dentro] < 0.5).all()
     assert np.isnan(afin.relativa_aprendida("Jazz", DISFARCADAS)).all()  # sem rótulos: sem régua aprendida
     assert np.array_equal(
         afin.relativa_receita("Rock", DISFARCADAS), afin.relativa("Rock", DISFARCADAS)
@@ -98,11 +104,14 @@ def test_receita_fica_na_v2_ate_a_aprendida_ser_adotada(con, monkeypatch):
                         "diversidade": {"lambda": 1.0, "max_por_artista": None}})  # fmt: skip
     hoje = executar(con, receita)
     assert not set(DISFARCADAS) & set(hoje.ids) and "+rotulos:" not in hoje.versao_banco
-    assert hoje.versao_motor == VERSAO_MOTOR == "2"
-    monkeypatch.setattr(generos, "REGUA_RECEITAS", "aprendida")
+    assert hoje.versao_motor == VERSAO_MOTOR == "3"
+    monkeypatch.setattr(generos, "REGUA_APRENDIDA", frozenset({"Rock"}))
     ex = executar(con, carregar({"nome": "rock", "tamanho": 100, "filtros": {"genero_pai_min": {"Rock": 0.8}},
                                  "diversidade": {"lambda": 1.0, "max_por_artista": None}}))  # fmt: skip
-    assert set(DISFARCADAS) <= set(ex.ids)
+    julgadas = {
+        v for v, d in zip(DISFARCADAS, aprendido.obter(con).dentro_da_guarda(DISFARCADAS), strict=True) if d
+    }
+    assert julgadas and julgadas <= set(ex.ids) and "rock29" not in ex.ids
     assert not any(v.startswith(("rap", "ambient")) for v in ex.ids)
     assert ex.versao_banco.endswith("+rotulos:" + aprendido.hash_rotulos(con))
     sem_genero = executar(con, carregar({"nome": "x", "tamanho": 5}))
@@ -187,7 +196,7 @@ def test_cli_status_e_rotulo(con):
     run = CliRunner()
     r = run.invoke(app, ["generos", "status", "--validar"])
     assert r.exit_code == 0, r.output
-    assert "aprendido" in r.output and "artista de fora: AUC" in r.output
+    assert "aprendido" in r.output and "com a guarda  AUC" in r.output and "(artista de fora;" in r.output
     r = run.invoke(app, ["generos", "rotulo", "rock27", "Rock", "nao"])
     assert r.exit_code == 0 and "Rock = nao" in r.output
     assert run.invoke(app, ["generos", "rotulo", "rock27", "Rock", "talvez"]).exit_code != 0
@@ -206,3 +215,78 @@ def test_portao_o_modelo_nao_julga_o_que_a_v2_poe_num_pai_sem_rotulos(con):
     aprendido.rotular(con, "rock25", "Rock", True, "cli")
     afin = generos.Afinidades(con)
     assert afin.relativa_aprendida("Rock", ["rock25"])[0] >= 1.0
+
+
+# ------------------------------------------------------------------ guarda (#101)
+
+
+def _trilhas(con, n=6):
+    """ambient24–29 viram faixas que não se parecem com nada rotulado (embedding longe de tudo), mas que a v2 ainda
+    põe no Electronic, um pai com modelo: o caso das trilhas de jogo. O portão não as barra; a guarda, sim."""
+    rng = np.random.default_rng(7)
+    longe = rng.standard_normal(32) * 3
+    ids = [f"ambient{i:02d}" for i in range(24, 24 + n)]
+    for vid in ids:
+        vetores.gravar(con, vid, "effnet_emb", (longe + rng.standard_normal(32)).astype(np.float32))
+    espacos._cache.clear()
+    return ids
+
+
+def test_guarda_barra_o_que_nao_se_parece_com_nada_rotulado(con):
+    trilhas = _trilhas(con)
+    afin = generos.Afinidades(con)
+    assert not afin.fora_do_aprendido(trilhas).any()  # o portão deixa passar
+    assert not afin.aprendido.dentro_da_guarda(trilhas).any() and afin.nao_julgadas(trilhas).all()
+    for pai in ("Rock", "Hip Hop", "Electronic"):
+        assert np.array_equal(afin.relativa_aprendida(pai, trilhas), afin.relativa(pai, trilhas))
+    perto = [f"rock{i:02d}" for i in range(24, 29)]
+    assert afin.aprendido.dentro_da_guarda(perto).all()
+    aprendido.rotular(con, trilhas[0], "Electronic", False, "mcp")  # o rótulo ainda vence
+    assert generos.Afinidades(con).relativa_aprendida("Electronic", trilhas[:1])[0] == 0.0
+
+
+def test_guarda_e_deterministica_e_nao_conta_a_propria_faixa(con):
+    a, b = aprendido.Aprendido(con), aprendido.Aprendido(con)
+    ids = espacos.da_biblioteca(con)
+    assert np.array_equal(a.proximidade(ids), b.proximidade(ids)) and a.corte_guarda == b.corte_guarda
+    s = a.proximidade(["rock00"])[0]  # rotulada: medida contra as outras, então abaixo de 1
+    assert 0 < s < 0.99
+    assert np.isclose(a.corte_guarda, np.percentile(a.proximidade(a._rotuladas), aprendido.PERCENTIL_GUARDA))
+
+
+def test_validar_mede_a_guarda_com_o_artista_de_fora(con):
+    _trilhas(con)
+    v = aprendido.validar(con, "Rock")
+    assert (
+        set(v["com_guarda"]) == {"auc", "revocacao_0_8", "falsos_positivos_0_8"}
+        and v["com_guarda"]["auc"] > 0.9
+    )
+    assert v["v2"]["auc"] is not None and 0.5 < v["julgadas_pela_guarda"] <= 1.0
+    r = aprendido.fora_da_amostra(con, "Rock")
+    assert np.array_equal(r["com_guarda"][~r["dentro"]], r["v2"][~r["dentro"]])
+
+
+def test_mcp_diz_quando_a_faixa_ficou_fora_da_guarda(con):
+    from curator.interfaces import mcp
+
+    trilhas = _trilhas(con)
+    r = mcp.examinar_genero("Electronic", limite=0.8, n=60)
+    itens = {i["video_id"]: i for i in r["acima"] + r["abaixo"]}
+    vistas = [v for v in trilhas if v in itens]
+    assert vistas and all(itens[v].get("aprendida_nao_julga") for v in vistas)
+    assert not any(itens[v].get("aprendida_nao_julga") for v in itens if v.startswith("rap"))
+
+
+def test_hip_hop_e_pop_usam_a_aprendida_e_os_outros_a_v2(con):
+    """Decisão do usuário em 09/11 (#101): a régua aprendida entra nas receitas só no Hip Hop e no Pop."""
+    assert {"Hip Hop", "Pop"} == generos.REGUA_APRENDIDA
+    afin = generos.Afinidades(con)
+    assert afin.usa_aprendida("Hip Hop") and not afin.usa_aprendida("Rock")
+    assert not afin.usa_aprendida("Pop")  # sem rótulos de Pop no teste: sem modelo, fica na v2
+    ids = espacos.da_biblioteca(con)
+    assert np.array_equal(afin.relativa_receita("Hip Hop", ids), afin.relativa_aprendida("Hip Hop", ids))
+    assert np.array_equal(afin.relativa_receita("Rock", ids), afin.relativa("Rock", ids))
+    rap = executar(
+        con, carregar({"nome": "rap", "tamanho": 50, "filtros": {"genero_pai_min": {"Hip Hop": 0.8}}})
+    )
+    assert rap.versao_banco.endswith("+rotulos:" + aprendido.hash_rotulos(con)) and rap.versao_motor == "3"

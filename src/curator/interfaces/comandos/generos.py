@@ -75,9 +75,13 @@ def status(
         typer.echo(f"  {r['pai']:<24} sim {r['sim']:>4} · não {r['nao']:>4} · {extra}")
         if validar and r["modelo"]:
             v = aprendido.validar(con, r["pai"])
+            for nome, m in (("modelo", v), ("com a guarda", v["com_guarda"]), ("régua v2", v["v2"])):
+                typer.echo(
+                    f"  {'':<24} {nome:<13} AUC {m['auc']:.3f} · no 0,8 revocação {m['revocacao_0_8']:.2f}, "
+                    f"falsos positivos {m['falsos_positivos_0_8']:.2f}"
+                )
             typer.echo(
-                f"  {'':<24} artista de fora: AUC {v['auc']:.3f} · no 0,8 revocação {v['revocacao_0_8']:.2f}, "
-                f"falsos positivos {v['falsos_positivos_0_8']:.2f}"
+                f"  {'':<24} (artista de fora; a guarda deixou o modelo julgar {v['julgadas_pela_guarda']:.0%})"
             )
 
 

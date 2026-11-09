@@ -24,9 +24,10 @@ sonora tocam vários gêneros).
 
 Pop e Electronic não se separam bem só pelo áudio: esses modelos chamam a produção pop moderna de Electronic.
 
-**A régua aprendida com os seus rótulos (#93, ADR-17; `relativa_aprendida`)** fica ao lado, no `examinar_genero`, até
-os rótulos cobrirem o pop japonês e as trilhas: com o gabarito de hoje ela acerta o rock japonês, mas põe no Rock o
-pop de anime. `REGUA_RECEITAS = "aprendida"` a leva para as receitas (`relativa_receita`), com `VERSAO_MOTOR` novo.
+**A régua aprendida com os seus rótulos (#93, #101, ADR-17; `relativa_aprendida`)** aparece ao lado, no
+`examinar_genero`. Ela só julga a faixa que passa pelo portão e pela guarda (parecida com faixas rotuladas); nas
+outras vale a v2. Ela entra nas receitas (`relativa_receita`) gênero a gênero, nos pais de `REGUA_APRENDIDA`, que é
+uma decisão do usuário. Mudar esse conjunto pede um `VERSAO_MOTOR` novo.
 """
 
 import re
@@ -37,8 +38,9 @@ import numpy as np
 
 from curator.motor import espacos
 
-# a régua do `genero_pai_min` nas receitas: "v2" (ADR-14) ou "aprendida" (#93, ADR-17; onde houver modelo)
-REGUA_RECEITAS = "v2"
+# os gêneros-pai em que o `genero_pai_min` das receitas usa a régua aprendida (#93, #101, ADR-17), decididos pelo
+# usuário um a um. Os outros, e os sem modelo, ficam na v2 (ADR-14). Mudar o conjunto pede um `VERSAO_MOTOR` novo.
+REGUA_APRENDIDA: frozenset[str] = frozenset({"Hip Hop", "Pop"})  # decisão de 09/11 (#101), VERSAO_MOTOR "3"
 
 # gênero-pai do Discogs400 → rótulos equivalentes do MTG-Jamendo (só os inequívocos)
 MAPA_JAMENDO = {
@@ -274,7 +276,7 @@ class Afinidades:
         return self._aprendido
 
     def usa_aprendida(self, pai: str) -> bool:
-        return REGUA_RECEITAS == "aprendida" and pai in self.aprendido.modelos
+        return pai in REGUA_APRENDIDA and pai in self.aprendido.modelos
 
     def fora_do_aprendido(self, ids: list[str]) -> np.ndarray:
         """Faixas que a régua v2 põe em 1º lugar num pai SEM modelo aprendido (trilha sonora, clássica…): o portão
@@ -286,18 +288,25 @@ class Afinidades:
         com_modelo = np.array([p in self.aprendido.modelos for p in self.pais])
         return ~com_modelo[dominante]
 
+    def nao_julgadas(self, ids: list[str]) -> np.ndarray:
+        """Faixas em que o modelo aprendido não opina: barradas pelo portão (`fora_do_aprendido`) ou pela guarda
+        (#101: longe de tudo o que foi rotulado). Nelas vale a v2."""
+        if not ids:
+            return np.zeros(0, bool)
+        return self.fora_do_aprendido(ids) | ~self.aprendido.dentro_da_guarda(ids)
+
     def relativa_aprendida(self, pai: str, ids: list[str]) -> np.ndarray:
-        """A régua aprendida (#93, ADR-17): o modelo nas faixas que passam pelo portão (`fora_do_aprendido`), a
-        relativa (v2) nas outras, e os rótulos do usuário por cima. NaN em tudo se o pai não tem modelo."""
+        """A régua aprendida (#93, #101, ADR-17): o modelo nas faixas que ele julga (`nao_julgadas`), a relativa
+        (v2) nas outras, e os rótulos do usuário por cima. NaN em tudo se o pai não tem modelo."""
         if pai not in self.aprendido.modelos:
             return np.full(len(ids), np.nan)
         ap = self.aprendido.relativa(pai, ids)
-        rel = np.where(np.isnan(ap) | self.fora_do_aprendido(ids), self.relativa(pai, ids), ap)
+        rel = np.where(np.isnan(ap) | self.nao_julgadas(ids), self.relativa(pai, ids), ap)
         return self.aprendido.sobrepor_rotulos(pai, ids, rel)
 
     def relativa_receita(self, pai: str, ids: list[str]) -> np.ndarray:
-        """A régua do `genero_pai_min`: a relativa (v2) ou, com `REGUA_RECEITAS = "aprendida"`, a aprendida nos
-        pais que têm modelo."""
+        """A régua do `genero_pai_min`: a aprendida nos pais de `REGUA_APRENDIDA` que têm modelo, a relativa (v2)
+        nos outros."""
         if self.usa_aprendida(pai):
             return self.relativa_aprendida(pai, ids)
         return self.relativa(pai, ids)

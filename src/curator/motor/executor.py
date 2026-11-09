@@ -10,8 +10,9 @@
 
 `VERSAO_MOTOR` muda quando o significado de um campo da receita muda; a execução guarda a versão (ADR-05).
 v2 (#83): `genero_pai_min` passou a ser a afinidade relativa ao núcleo do gênero (ADR-14), não o maior estilo.
-Com `generos.REGUA_RECEITAS = "aprendida"` (#93, ADR-17; hoje "v2"), `genero_pai_min` usaria a régua aprendida com os
-rótulos do usuário. Isso pede um `VERSAO_MOTOR` novo, e a versão do banco da execução já leva o hash dos rótulos.
+v3 (#101): nos gêneros de `generos.REGUA_APRENDIDA` (Hip Hop e Pop), `genero_pai_min` usa a régua aprendida com os
+rótulos do usuário (ADR-17), com portão e guarda. Mudar esse conjunto pede um `VERSAO_MOTOR` novo, e a versão do banco
+da execução já leva o hash dos rótulos.
 """
 
 import json
@@ -27,7 +28,7 @@ from curator.motor import espacos, generos, popularidade
 from curator.motor.receita import POPULARIDADE, Receita, resolver_playlist, validar
 from curator.texto import normalizar
 
-VERSAO_MOTOR = "2"
+VERSAO_MOTOR = "3"
 
 
 @dataclass

@@ -575,7 +575,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
    - Sem gabarito, o núcleo faz o papel de rótulos fracos: faixas em que duas visões concordam, como no co-training (Blum & Mitchell, 1998). A ressalva é a mesma do item 2: as visões não são independentes.
    - Núcleo com menos de 10 faixas: núcleo amplo (1º lugar em qualquer cabeça). Sem isso, a referência global (mediana das medianas dos núcleos). Na biblioteca atual, Blues, Latin, Funk/Soul e Reggae ficam na global, e `descrever_vocabulario` avisa.
 4. **A fronteira é conferida pela IA:** `examinar_genero(pai, limite)` mostra quantas faixas passam em cada nível e as faixas logo acima e logo abaixo do corte. Gênero é ambíguo também para pessoas (Lippens et al., 2004), e um sistema pode acertar uma métrica sem saber o que é o gênero (Sturm, 2014). A fronteira rap/pop não está no som: Heat Waves e Stressed Out passam do corte, e Houdini fica abaixo dele. A IA usa o que sabe dos artistas para ajustar o limite, e a receita guarda o número (ADR-05).
-5. **Versão do motor:** `VERSAO_MOTOR = "2"` fica gravada em cada execução de receita (migração 016). Mesma receita + mesmo banco + mesma versão = mesma lista.
+5. **Versão do motor:** `VERSAO_MOTOR` fica gravada em cada execução de receita (migração 016). Mesma receita + mesmo banco + mesma versão = mesma lista. Esta régua é a v2; a v3 (#101) leva o Hip Hop e o Pop para a régua aprendida (ADR-17).
 
 **Testado e rejeitado** (medições em `docs/avaliacao.md`)
 - **Suavizar pelos vizinhos no embedding**, como na propagação de rótulos por similaridade de conteúdo (Sordo et al., 2007):
@@ -703,7 +703,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 
 **Contexto:** as réguas do ADR-14 e do ADR-15 são zero-shot. Usam a taxonomia do Discogs e não sabem o que o usuário chama de cada gênero. No Discogs, "J-pop" é etiqueta de mercado, e por isso a régua com o MAEST tira o rock japonês do Rock. Nenhuma regra fixa acerta os dois lados (ADR-15).
 
-**Decisão:** um modelo por gênero-pai, aprendido com os rótulos do usuário (`motor/aprendido.py`, migração 020). Por ora, ele fica **ao lado**, e as receitas seguem a régua v2.
+**Decisão:** um modelo por gênero-pai, aprendido com os rótulos do usuário (`motor/aprendido.py`, migração 020). Ele aparece ao lado da v2 no `examinar_genero` e entra nas receitas gênero a gênero, por decisão do usuário (`generos.REGUA_APRENDIDA`): desde a #101 (motor v3), no **Hip Hop** e no **Pop**. Rock e Electronic seguem na v2.
 
 1. **Rótulos.**
    - Ficam em `rotulos_genero` ("esta faixa é / não é Rock") e **nunca** vêm das playlists existentes.
@@ -717,22 +717,31 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
    - Só tem modelo o pai com 20 positivos de 3 artistas e 20 negativos. Os outros ficam com a régua do ADR-14.
 3. **Escala.** A mesma ideia da régua: 1,0 = tão típica quanto a mediana do núcleo aprendido, que são as faixas da biblioteca com p ≥ 0,5. Os níveis 0,7 / 0,8 / 1,0 valem igual.
 4. **Portão.** O modelo só conhece os pais rotulados e, sem portão, decide entre eles até para o que não é nenhum: O Lago dos Cisnes ia para o Hip Hop, e 70% das faixas clássicas e de trilha sonora iam para o Electronic. Por isso ele só julga a faixa que a régua v2 põe em primeiro lugar num pai com modelo. Isso é reconhecimento em conjunto aberto, como em Scheirer et al. (2013).
-5. **Os rótulos vencem.** Uma faixa marcada "sim" tem pelo menos 1,0, e uma marcada "não" fica com 0, com ou sem portão.
-6. **Aprendizado ativo** (Settles, 2009). `curator generos rotular PAI` e as ferramentas `faixas_para_rotular`/`rotular_genero` do MCP perguntam primeiro as faixas sem rótulo que as réguas (v2, com o MAEST, aprendida) põem de lados opostos do corte 0,8. Depois vêm as perto do corte, com no máximo 2 por artista e sem repetir a mesma música. A IA só grava a resposta do usuário.
-7. **Por que ao lado, e não nas receitas.** Deixando o artista inteiro de fora (10 dobras por artista), o modelo passa nos três critérios da #93:
+5. **Guarda (#101).** O portão não basta: quase metade da biblioteca (1.566 faixas) é trilha de jogo, que a v2 põe no Electronic, um pai com modelo, e o gabarito não tem nada parecido. Sem guarda, o modelo põe 288 trilhas no Hip Hop. Por isso ele só julga a faixa que se parece com faixas rotuladas:
+   - a nota é a média do cosseno com as 5 faixas rotuladas mais próximas, no espaço do modelo (EffNet + MAEST em z-score), de qualquer pai;
+   - o corte é o percentil 5 das próprias rotuladas, cada uma medida sem contar a si mesma;
+   - fora da guarda, vale a v2. É determinística: mesmos rótulos + mesma biblioteca → mesmo corte.
+
+   É a detecção fora da distribuição por vizinhos de Sun et al. (2022), usada como abstenção: o modelo só opina onde é confiável, como na classificação seletiva (Geifman & El-Yaniv, 2017). Na biblioteca de 09/11, ele julga 87% das faixas japonesas sem rótulo e 10% das trilhas. O `examinar_genero` marca a faixa em que ele não opina (`aprendida_nao_julga`).
+6. **Os rótulos vencem.** Uma faixa marcada "sim" tem pelo menos 1,0, e uma marcada "não" fica com 0, com ou sem portão ou guarda. Faixas ignoradas (#100) não ensinam.
+7. **Rótulos só no uso (#101).** Sessões de rotular faixa a faixa não escalam e o usuário não as quer: o objetivo do projeto é ajudar a classificar. Os rótulos nascem quando ele diz, ao ver uma playlist ou a fronteira, que uma faixa é ou não é de um gênero (`rotular_genero` no MCP). O aprendizado ativo (Settles, 2009) continua disponível só a pedido (`curator generos rotular PAI`, `faixas_para_rotular`): primeiro as faixas sem rótulo que as réguas põem de lados opostos do corte 0,8, depois as perto do corte, com no máximo 2 por artista.
+8. **Decisão por gênero (#101).** Medido com o artista inteiro de fora e com a guarda (tabela em `docs/avaliacao.md`), o usuário adotou a régua aprendida no Hip Hop (revocação no 0,8 de 0,43 para 0,86; rap faixa a faixa com AUC de 0,946 para 0,990) e no Pop (AUC de 0,890 para 0,977). No Rock ela empata e piora o rock japonês (87% → 80%); no Electronic, perde revocação (0,85 → 0,71) e põe mais trilhas. Esses dois ficam na v2.
+9. **Histórico: por que começou ao lado (#93).** Deixando o artista inteiro de fora (10 dobras por artista), o modelo passa nos três critérios da #93:
    - rap faixa a faixa com AUC 1,000;
    - Pop por artista com AUC 0,966 (régua v2: 0,854);
    - 98% do rock japonês ≥ 0,8 no Rock (régua com o MAEST: 54%).
 
    Mas o gabarito só tem rock japonês e nenhum pop japonês nem de anime. O modelo aprendeu que "produção japonesa de anime = Rock": põe no Rock músicas de idol e de personagem (Petit Rabbit's, 七森中☆ごらく部) e tira do Pop ClariS e YOASOBI. Também põe trilhas de jogo (HOYO-MiX) no Hip Hop. Trocar a régua das receitas agora trocaria um erro por outro.
 
-   Essas faixas são exatamente as primeiras que o aprendizado ativo pergunta. Com elas rotuladas, a decisão volta a ser medida (`contrib/avaliacao/genero_aprendido.py`). Para adotar a régua: `generos.REGUA_RECEITAS = "aprendida"` e um `VERSAO_MOTOR` novo. A versão do banco da execução já leva o hash dos rótulos.
+   Em 09/11, o gabarito ganhou o J-pop no Pop, e a guarda tirou as trilhas do modelo. A decisão foi medida de novo (`contrib/avaliacao/genero_aprendido.py`) e tomada por gênero (item 8). Mudar `generos.REGUA_APRENDIDA` pede um `VERSAO_MOTOR` novo. A versão do banco da execução já leva o hash dos rótulos.
 
 **Testado e não adotado:**
 - **YAMNet e as tags do MSD como atributos a mais:** dentro do ruído.
 - **A média da aprendida com uma das réguas:** devolve parte do rock japonês ao Pop (87–89%) e derruba a revocação do Pop no 0,8 para 0,36.
 - **Negativos de fundo** (o núcleo dos pais sem rótulo como "não"): pioram o Electronic (AUC 0,966 → 0,908), porque trilha de jogo e eletrônica se parecem.
 - **Aprendizado por reforço:** exige milhares de tentativas com recompensa e explora ao acaso.
+- **Gêneros externos (Deezer, MusicBrainz) como rótulos automáticos (#101):** dizem Rock em 64% das faixas que não são Rock e Pop em 58% das que não são Pop, e nenhuma das 1.570 trilhas vem marcada como trilha.
+- **Desligar o negativo implícito entre Pop e Electronic (#101):** o Electronic passa a pegar 1.123 faixas, um terço da biblioteca.
 
 ---
 
@@ -799,5 +808,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Alonso-Jiménez, P., Serra, X., & Bogdanov, D. (2023). *Efficient Supervised Training of Audio Transformers for Music Representation Learning*. ISMIR 2023. arXiv:2309.16418.
 - Kim, J. H., Tomasik, B., & Turnbull, D. (2009). *Using Artist Similarity to Propagate Semantic Information*. ISMIR 2009.
 - Settles, B. (2009). *Active Learning Literature Survey*. Computer Sciences Technical Report 1648, University of Wisconsin–Madison.
+- Sun, Y., Ming, Y., Zhu, X., & Li, Y. (2022). *Out-of-Distribution Detection with Deep Nearest Neighbors*. ICML 2022, PMLR 162.
+- Geifman, Y., & El-Yaniv, R. (2017). *Selective Classification for Deep Neural Networks*. NeurIPS 2017.
 - Scheirer, W. J., de Rezende Rocha, A., Sapkota, A., & Boult, T. E. (2013). *Toward Open Set Recognition*. IEEE Transactions on Pattern Analysis and Machine Intelligence, 35(7), 1757–1772.
 - Sturm, B. L. (2014). *A simple method to determine if a music information retrieval system is a "horse"*. IEEE Transactions on Multimedia, 16(6), 1636–1644. doi:10.1109/TMM.2014.2330697.

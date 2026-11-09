@@ -22,11 +22,18 @@ seus rótulos (`rotulos_genero`, migração 020), que nunca vêm das playlists e
   primeiro lugar num pai que tem modelo. As outras (trilha sonora, clássica…) ficam com a régua do ADR-14 em todos
   os pais. Negativos de fundo tirados do núcleo dos pais sem rótulo foram testados e pioraram o Electronic (AUC
   0,966 → 0,908): trilha de jogo e eletrônica se parecem.
+- **Guarda (longe do que aprendeu, #101):** o portão não basta: quase metade da biblioteca é trilha de jogo, que a v2
+  põe no Electronic (um pai com modelo), e o modelo nunca viu nada parecido. Então ele só julga a faixa que se
+  parece com faixas rotuladas: a média do cosseno com as `K_GUARDA` rotuladas mais próximas, no espaço do modelo,
+  tem de chegar ao percentil `PERCENTIL_GUARDA` das próprias rotuladas (cada uma sem contar a si mesma). Fora
+  disso, vale a régua do ADR-14. É a detecção fora da distribuição por vizinhos de Sun et al. (2022), usada como
+  abstenção (classificação seletiva, Geifman & El-Yaniv, 2017).
 - **Os rótulos vencem:** uma faixa marcada "sim" tem pelo menos 1,0, e uma marcada "não" fica com 0, com ou sem
-  portão.
+  portão ou guarda.
 
-Avaliação (deixando o artista inteiro de fora; docs/avaliacao.md): rap faixa a faixa com AUC 1,000, Pop por artista
-0,977 (régua v2: 0,848) e 98% do rock japonês ≥ 0,8 no Rock (régua com MAEST: 54%). Testados e deixados de fora:
+Avaliação com a guarda (deixando o artista inteiro de fora; docs/avaliacao.md, #101): rap faixa a faixa com AUC 0,990
+(régua v2: 0,946), Pop por artista 0,977 (v2: 0,890) e 80% do rock japonês ≥ 0,8 no Rock. Nas receitas, a régua
+aprendida vale no Hip Hop e no Pop (`generos.REGUA_APRENDIDA`). Testados e deixados de fora:
 - YAMNet e as tags do MSD como atributos a mais (dentro do ruído);
 - a média com uma das réguas (devolve o rock japonês ao Pop).
 """
@@ -47,6 +54,8 @@ C0 = 10.0  # coluna constante do intercepto: com ela grande, a penalidade quase 
 MIN_POSITIVOS, MIN_NEGATIVOS, MIN_ARTISTAS = 20, 20, 3
 MIN_NUCLEO = 10
 DOBRAS = 10
+K_GUARDA = 5
+PERCENTIL_GUARDA = 5.0
 ORIGENS = ("gabarito_artista", "gabarito_faixa", "cli", "mcp")
 
 
@@ -76,6 +85,37 @@ def ajustar(X: np.ndarray, y: np.ndarray, lam: float = LAMBDA, iters: int = 50) 
 
 def prever(beta: np.ndarray, X: np.ndarray) -> np.ndarray:
     return 1 / (1 + np.exp(-(np.hstack([X, np.full((len(X), 1), C0)]) @ beta)))
+
+
+# ------------------------------------------------------------------ guarda (#101)
+
+
+def _l2(X: np.ndarray) -> np.ndarray:
+    return X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
+
+
+def vizinhanca(
+    XL: np.ndarray, rotuladas: list[str], X: np.ndarray, ids: list[str], k: int = K_GUARDA
+) -> np.ndarray:
+    """Média do cosseno de cada linha de `X` com as `k` linhas mais próximas de `XL` (as duas já em L2), sem contar a
+    própria faixa quando ela é rotulada. NaN se não há rotuladas suficientes."""
+    out = np.full(len(ids), np.nan)
+    if len(rotuladas) <= k or not len(ids):
+        return out
+    pos = {v: j for j, v in enumerate(rotuladas)}
+    for i0 in range(0, len(ids), 2048):
+        S = X[i0 : i0 + 2048] @ XL.T
+        for i, v in enumerate(ids[i0 : i0 + 2048]):
+            if v in pos:
+                S[i, pos[v]] = -np.inf
+        out[i0 : i0 + len(S)] = np.sort(S, axis=1)[:, -k:].mean(axis=1)
+    return out
+
+
+def corte_guarda(s_rotuladas: np.ndarray, percentil: float = PERCENTIL_GUARDA) -> float:
+    """O limite da guarda: o percentil das próprias rotuladas (cada uma medida sem contar a si mesma)."""
+    s = s_rotuladas[~np.isnan(s_rotuladas)]
+    return float(np.percentile(s, percentil)) if len(s) else np.inf
 
 
 # ------------------------------------------------------------------ rótulos
@@ -205,6 +245,10 @@ class Aprendido:
             nucleo = p_base[p_base >= 0.5]
             ref = float(np.median(nucleo)) if len(nucleo) >= MIN_NUCLEO else 0.5
             self.modelos[pai] = Modelo(pai, beta, max(ref, 0.5), pos, neg, n_art, len(nucleo))
+        # a guarda: todas as faixas rotuladas, de qualquer pai, são o "conhecido"
+        self._rotuladas = sorted({v for d in self._rotulos.values() for v in d if v in self._e.indice})
+        self._XL = _l2(self.atributos(self._rotuladas)[0])
+        self.corte_guarda = corte_guarda(vizinhanca(self._XL, self._rotuladas, self._XL, self._rotuladas))
 
     @staticmethod
     def _artistas(con: sqlite3.Connection) -> dict[str, str]:
@@ -228,6 +272,21 @@ class Aprendido:
                         X[i] = (mat.X[mat.indice[v]] - mu) / sd
             partes.append(X)
         return np.hstack(partes), tem
+
+    def proximidade(self, ids: list[str]) -> np.ndarray:
+        """A nota da guarda: média do cosseno com as `K_GUARDA` faixas rotuladas mais próximas. NaN sem EffNet."""
+        out = np.full(len(ids), np.nan)
+        X, tem = self.atributos(ids)
+        if tem.any():
+            out[tem] = vizinhanca(
+                self._XL, self._rotuladas, _l2(X[tem]), [v for v, t in zip(ids, tem, strict=True) if t]
+            )
+        return out
+
+    def dentro_da_guarda(self, ids: list[str]) -> np.ndarray:
+        """Faixas parecidas o bastante com as rotuladas para o modelo julgar (NaN conta como fora)."""
+        s = self.proximidade(ids)
+        return np.where(np.isnan(s), False, s >= self.corte_guarda)
 
     def prob(self, pai: str, ids: list[str]) -> np.ndarray:
         """Probabilidade do modelo do pai; NaN sem modelo ou sem EffNet."""
@@ -276,10 +335,19 @@ def obter(con: sqlite3.Connection) -> Aprendido:
 # ------------------------------------------------------------------ validação
 
 
-def validar(con: sqlite3.Connection, pai: str, dobras: int = DOBRAS) -> dict | None:
-    """AUC e revocação/falsos positivos no 0,8, deixando o artista inteiro de fora (as dobras são por artista).
-    None se o pai não tem rótulos suficientes."""
-    ap = obter(con)
+def fora_da_amostra(con: sqlite3.Connection, pai: str, dobras: int = DOBRAS) -> dict | None:
+    """As notas de cada faixa rotulada do pai deixando o artista INTEIRO de fora (dobras por artista): o modelo da
+    dobra nunca viu uma faixa do artista que está prevendo, e a guarda da dobra só conhece as rotuladas dos outros
+    artistas. None se o pai não tem modelo.
+
+    - `aprendida`: só o modelo (p ÷ referência do núcleo);
+    - `com_guarda`: o que a receita veria com a régua aprendida: o modelo nas faixas que passam pelo portão e pela
+      guarda, a v2 nas outras (sem o rótulo da própria faixa, que é o que se está prevendo);
+    - `dentro`: a faixa passou pela guarda da dobra."""
+    from curator.motor import generos
+
+    afin = generos.Afinidades(con)
+    ap = afin.aprendido
     if pai not in ap.modelos:
         return None
     rot = ap._rotulos[pai]
@@ -289,9 +357,11 @@ def validar(con: sqlite3.Connection, pai: str, dobras: int = DOBRAS) -> dict | N
     grupos = sorted({artista.get(v, v) for v in vids})
     dobra = {g: i % dobras for i, g in enumerate(grupos)}
     X, _ = ap.atributos(vids)
-    base = espacos.da_biblioteca(con)
-    X_base, tem_base = ap.atributos(base)
+    Xn = _l2(X)
+    X_base, tem_base = ap.atributos(espacos.da_biblioteca(con))
+    art_l = np.array([artista.get(v, v) for v in ap._rotuladas], object)
     s = np.zeros(len(vids))
+    dentro = np.zeros(len(vids), bool)
     for k in range(dobras):
         te = np.array([dobra[artista.get(v, v)] == k for v in vids])
         if not te.any() or len(set(y[~te])) < 2:
@@ -301,11 +371,37 @@ def validar(con: sqlite3.Connection, pai: str, dobras: int = DOBRAS) -> dict | N
         nucleo = p_base[p_base >= 0.5]
         ref = max(float(np.median(nucleo)) if len(nucleo) >= MIN_NUCLEO else 0.5, 0.5)
         s[te] = prever(beta, X[te]) / ref
+        fora = {g for g in grupos if dobra[g] == k}
+        conhecidas = np.array([a not in fora for a in art_l], bool)
+        XL, L = ap._XL[conhecidas], [v for v, c in zip(ap._rotuladas, conhecidas, strict=True) if c]
+        corte = corte_guarda(vizinhanca(XL, L, XL, L))
+        prox = vizinhanca(XL, L, Xn[te], [v for v, t in zip(vids, te, strict=True) if t])
+        dentro[te] = np.where(np.isnan(prox), False, prox >= corte)
+    v2 = afin.relativa(pai, vids)
+    return {"vids": vids, "y": y, "artistas": len(grupos), "aprendida": s, "v2": v2, "dentro": dentro,
+            "com_guarda": np.where(dentro & ~afin.fora_do_aprendido(vids), s, v2)}  # fmt: skip
+
+
+def _medidas(s: np.ndarray, y: np.ndarray) -> dict:
     pos, neg = s[y == 1], s[y == 0]
     return {
-        "pai": pai, "positivos": len(pos), "negativos": len(neg), "artistas": len(grupos),
-        "auc": _auc(pos, neg), "revocacao_0_8": float(np.mean(pos >= 0.8)) if len(pos) else None,
+        "auc": _auc(pos, neg),
+        "revocacao_0_8": float(np.mean(pos >= 0.8)) if len(pos) else None,
         "falsos_positivos_0_8": float(np.mean(neg >= 0.8)) if len(neg) else None,
+    }
+
+
+def validar(con: sqlite3.Connection, pai: str, dobras: int = DOBRAS) -> dict | None:
+    """AUC e revocação/falsos positivos no 0,8, deixando o artista inteiro de fora: o modelo sozinho (chaves de cima),
+    `com_guarda` (o que a receita veria) e a `v2`. None se o pai não tem rótulos suficientes."""
+    r = fora_da_amostra(con, pai, dobras)
+    if r is None:
+        return None
+    y = r["y"]
+    return {
+        "pai": pai, "positivos": int(y.sum()), "negativos": int(len(y) - y.sum()), "artistas": r["artistas"],
+        **_medidas(r["aprendida"], y), "com_guarda": _medidas(r["com_guarda"], y), "v2": _medidas(r["v2"], y),
+        "julgadas_pela_guarda": float(r["dentro"].mean()),
     }  # fmt: skip
 
 
