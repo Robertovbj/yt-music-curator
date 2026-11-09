@@ -153,8 +153,9 @@ def fatores_dislike(con: sqlite3.Connection, ids: list[str], cfg: dict) -> dict[
     avaliadas = {
         a: (d, c)
         for a, d, c in con.execute(
-            """SELECT fa.artista_id, sum(f.avaliacao = 'dislike'), sum(f.curtida = 1 AND f.avaliacao != 'dislike')
-               FROM faixa_artistas fa JOIN faixas f USING (video_id) GROUP BY fa.artista_id
+            f"""SELECT fa.artista_id, sum(f.avaliacao = 'dislike'), sum(f.curtida = 1 AND f.avaliacao != 'dislike')
+               FROM faixa_artistas fa JOIN faixas f USING (video_id)
+               WHERE f.video_id NOT IN ({consultas.IGNORADAS}) GROUP BY fa.artista_id
                HAVING sum(f.avaliacao = 'dislike') > 0"""
         )
     }
@@ -235,7 +236,7 @@ def candidatas(
             rk.descartes["dislike"] += 1
             continue
         if vid in ignoradas:
-            rk.descartes["playlist ignorada"] += 1
+            rk.descartes["ignorada"] += 1
             continue
         if conhecidas != (vid in dentro):
             if not conhecidas:

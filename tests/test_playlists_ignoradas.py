@@ -55,7 +55,7 @@ def test_receita_nao_usa_nem_referencia(con):
     ex = executar(con, carregar({"nome": "x", "tamanho": 100, "universo": "curtidas",
                                  "diversidade": {"max_por_artista": None}}))  # fmt: skip
     assert ex.ids and not set(JOGO) & set(ex.ids)
-    assert ex.descartes["playlist ignorada"] == 14
+    assert ex.descartes["ignorada"] == 14
     assert resolver_playlist(con, "Valorant Plays") is None
     with pytest.raises(ReceitaInvalida):
         executar(con, carregar({"nome": "x", "universo": "PLjogo"}))
@@ -115,7 +115,7 @@ def test_recomendacao_nao_semeia_nem_sugere(con):
         cfg_rec(),
     )
     res = pedir(faixas=["rock05"])
-    assert [i.video_id for i in res.itens] == ["novo1"] and res.descartes["playlist ignorada"] == 1
+    assert [i.video_id for i in res.itens] == ["novo1"] and res.descartes["ignorada"] == 1
     with pytest.raises(SementeInvalida):
         pedir(faixas=["ambient00"])
     with pytest.raises(SementeInvalida):

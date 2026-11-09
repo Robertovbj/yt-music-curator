@@ -41,11 +41,17 @@ uv run curator hierarquia verificar                 # agregadoras contêm todas 
 uv run curator playlists ignorar "Valorant Plays"   # aceita várias; `considerar` desfaz
 uv run curator playlists ignoradas
 
+# faixas que não são música para você (meme, cover de piada): fora de tudo, continuam curtidas no YouTube
+uv run curator faixas ignorar VIDEO_ID --motivo "meme"   # aceita várias; `considerar` desfaz
+uv run curator faixas ignoradas
+
 # 4. visão geral
 uv run curator estatisticas
 ```
 
 Uma playlist ignorada some das listagens, do mapa, das receitas, da classificação, das recomendações e do MCP, e nenhum plano mexe nela. Os vídeos que só estão em playlists ignoradas também saem de tudo, mesmo curtidos, e não vão para a fila de análise; quem também está numa playlist normal continua valendo por ela. Análises já feitas ficam guardadas.
+
+Uma faixa ignorada (`curator faixas ignorar`) sai de tudo do mesmo jeito, mesmo que esteja numa playlist normal, e também dos rótulos de gênero e do pacote compartilhado. No YouTube nada muda, e o `sincronizar` não desfaz a marcação.
 
 A sincronização é total: uma música removida de uma playlist no YouTube Music some do banco. Uma playlist com a mesma contagem, sincronizada há menos de 24 h, não é baixada de novo (`--forcar` ignora esses caches).
 

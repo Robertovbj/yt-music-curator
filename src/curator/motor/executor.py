@@ -155,7 +155,7 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     if len(sem_dislike) < len(universo):
         ex.descartes["dislike"] = len(universo) - len(sem_dislike)
     if n:
-        ex.descartes["playlist ignorada"] = n
+        ex.descartes["ignorada"] = n
     if not cand:
         return ex
 

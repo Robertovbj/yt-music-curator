@@ -38,6 +38,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from curator.banco import consultas
 from curator.banco.conexao import agora
 from curator.motor import espacos
 
@@ -80,10 +81,15 @@ def prever(beta: np.ndarray, X: np.ndarray) -> np.ndarray:
 # ------------------------------------------------------------------ rótulos
 
 
+# Os rótulos de faixas na lista negra (#100) ficam guardados, mas não ensinam nada enquanto ela estiver ignorada.
+_ROTULOS_VALIDOS = f"""SELECT video_id, pai, sim FROM rotulos_genero
+                       WHERE video_id NOT IN ({consultas.IGNORADAS}) ORDER BY pai, video_id"""
+
+
 def rotulos(con: sqlite3.Connection) -> dict[str, dict[str, int]]:
     """pai → {video_id: 1/0}, com os negativos implícitos (marcada como de outro pai e sem rótulo neste)."""
     explicitos: dict[str, dict[str, int]] = {}
-    for vid, pai, sim in con.execute("SELECT video_id, pai, sim FROM rotulos_genero ORDER BY pai, video_id"):
+    for vid, pai, sim in con.execute(_ROTULOS_VALIDOS):
         explicitos.setdefault(pai, {})[vid] = int(sim)
     positivos = {p: {v for v, s in d.items() if s} for p, d in explicitos.items()}
     out = {}
@@ -99,7 +105,7 @@ def rotulos(con: sqlite3.Connection) -> dict[str, dict[str, int]]:
 
 def hash_rotulos(con: sqlite3.Connection) -> str:
     h = hashlib.sha256()
-    for vid, pai, sim in con.execute("SELECT video_id, pai, sim FROM rotulos_genero ORDER BY pai, video_id"):
+    for vid, pai, sim in con.execute(_ROTULOS_VALIDOS):
         h.update(f"{pai}\t{vid}\t{sim}\n".encode())
     return h.hexdigest()[:16]
 
@@ -257,9 +263,10 @@ _cache: dict[tuple, Aprendido] = {}
 
 
 def obter(con: sqlite3.Connection) -> Aprendido:
-    """O Aprendido deste banco, refeito quando mudam os rótulos, as análises ou o MAEST."""
+    """O Aprendido deste banco, refeito quando mudam os rótulos, as análises, o MAEST ou as faixas fora da base (um
+    dislike ou uma faixa ignorada muda o z-score e o núcleo)."""
     chave = (str(con.execute("PRAGMA database_list").fetchone()[2]), espacos.hash_biblioteca(con),
-             espacos._versao_extra(con, "maest519"), hash_rotulos(con))  # fmt: skip
+             espacos._versao_extra(con, "maest519"), hash_rotulos(con), consultas.hash_bloqueadas(con))  # fmt: skip
     if chave not in _cache:
         _cache.clear()
         _cache[chave] = Aprendido(con)

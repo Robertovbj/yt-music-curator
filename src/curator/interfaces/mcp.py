@@ -73,6 +73,8 @@ POPULARIDADE (visualizações de todo o YouTube, não as do usuário): `populari
 recomendações, use o campo `popularidade` {"alvo"} e `publicadas_desde` (lançamentos). "Só a versão de estúdio",
 "sem clipe", "sem cover" → filtros.tipos_video ["faixa"]. Veja a cobertura em descrever_vocabulario("features"):
 sem dados, ofereça `curator sincronizar` em vez de usar.
+FAIXAS IGNORADAS (#100): se o usuário disser que uma faixa não conta ("é meme", "desconsidere", "não é música"),
+use ignorar_faixa(video_id, motivo) com as palavras dele; desfazer=True volta atrás. NUNCA ignore por conta própria.
 """
 
 
@@ -383,6 +385,21 @@ def rotular_genero(video_id: str, pai: str, pertence: bool | None) -> dict:
         return {"erros": [f"faixa {video_id} não está no banco"]}
     aprendido.rotular(con, video_id, pai, pertence, "mcp")
     return {"ok": True, "video_id": video_id, "pai": pai, "pertence": pertence}
+
+
+def ignorar_faixa(video_id: str, motivo: str | None = None, desfazer: bool = False) -> dict:
+    """SÓ quando o USUÁRIO pedir para desconsiderar uma faixa (meme, cover de piada, não é música): ela sai de tudo
+    (biblioteca, receitas, classificação, clusters, mapa, recomendações, buscas, rótulos de gênero), mas continua
+    curtida no YouTube. `desfazer=True` devolve a faixa ao normal. Nunca ignore por conta própria."""
+    con = banco()
+    if not con.execute("SELECT 1 FROM faixas WHERE video_id = ?", (video_id,)).fetchone():
+        return {"erros": [f"faixa {video_id} não está no banco"]}
+    if desfazer:
+        r = consultas.considerar_faixas(con, [video_id])
+        return {"ok": True, "video_id": video_id, "ignorada": video_id in consultas.ignoradas(con),
+                "estava_ignorada": bool(r["consideradas"])}  # fmt: skip
+    r = consultas.ignorar_faixas(con, [video_id], motivo)
+    return {"ok": True, "video_id": video_id, "ignorada": True, "ja_estava": bool(r["ja_estavam"])}
 
 
 def exemplos_de_receitas() -> list[dict]:
@@ -799,7 +816,7 @@ def faltantes_nas_agregadoras() -> dict:
 
 FERRAMENTAS = [
     arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario, examinar_genero,
-    faixas_para_rotular, rotular_genero,
+    faixas_para_rotular, rotular_genero, ignorar_faixa,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
     sugerir_playlists_gerais, criar_plano_das_gerais, sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
     criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,

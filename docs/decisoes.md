@@ -184,6 +184,7 @@ src/curator/
 - Uma faixa pode estar em várias folhas ao mesmo tempo. Isso é esperado (ver ADR-06/07).
 - **Biblioteca** exclui as playlists de descobertas (`playlists.descobertas`, criadas a partir de recomendações, ADR-13): o que só está nelas ainda não foi curtido.
 - **Playlists ignoradas** (`playlists.ignorada`, #77; `curator playlists ignorar`): as que não são de música (vídeos do YouTube comum numa conta conjunta, aulas). Somem de tudo: listagens, mapa, receitas, classificação, clusters, recomendações (sementes e candidatas), MCP e planos (um plano que as altere é recusado). Os vídeos que só estão nelas viram lista negra, mesmo curtidos, e não entram na fila de análise; quem também está numa playlist válida continua valendo por ela. A marcação fica no banco, sobrevive a `sincronizar` e a `hierarquia aplicar`, e as análises já feitas são guardadas (ADR-02).
+- **Faixas ignoradas** (`faixas_ignoradas`, #100; `curator faixas ignorar`, ou `ignorar_faixa` no MCP quando o usuário pede): uma a uma, as curtidas que não são música para o curator (edição de meme, cover de piada). Entram na mesma lista negra (`consultas.IGNORADAS`), mas valem mesmo que a faixa esteja numa playlist válida. Saem também dos rótulos de gênero (ADR-17): o rótulo fica guardado e volta a valer se a faixa for considerada de novo (`curator faixas considerar`). A conta do YouTube não muda (a faixa continua curtida lá) e `sincronizar` não mexe na marcação.
 - **Faixas fora da biblioteca** (descurtidas, candidatas de recomendação) ficam guardadas com a análise (ADR-02), mas fora de todos os universos, do z-score, do mapa e dos clusters (`espacos.da_biblioteca`).
 
 **Avaliações (#60, #61).** `faixas.avaliacao` é `like`, `dislike` ou `neutra`, lida do `likeStatus` do ytmusicapi.
@@ -647,7 +648,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
    - fila, proxies e saídas (os IPs), config e credenciais;
    - o áudio e qualquer caminho local (o `fonte_ref` da pasta local sai vazio);
    - os tempos da máquina e as datas que mostram quando a faixa entrou na biblioteca;
-   - as faixas de playlists ignoradas (#77).
+   - as faixas da lista negra: as de playlists ignoradas (#77) e as ignoradas uma a uma (#100).
 
    O esquema do pacote é uma lista fechada de tabelas e colunas (`TABELAS`). Uma coluna nova no banco não vai junto sem alguém pôr ela ali.
 3. **Formato:** um zip com `manifesto.json` (versões, contagens, SHA-256) e `analises.db`, um SQLite só com essas tabelas.

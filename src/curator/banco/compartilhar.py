@@ -5,8 +5,8 @@ faixa, a análise (features, vetores e rótulos), os extras da #88 e os metadado
 
 **Nunca vai:** curtidas e posição, avaliações (like/dislike), playlists, receitas, planos, recomendações e coletas
 (as sementes revelam a biblioteca), clusters e projeções, fila, proxies e saídas, config e credenciais, o áudio, caminhos
-locais (o `fonte_ref` da pasta local sai vazio) e as datas que mostram quando a faixa entrou na biblioteca. As faixas de
-playlists ignoradas (#77) também ficam fora. A lista de faixas do pacote, sozinha, já mostra o que a pessoa escuta:
+locais (o `fonte_ref` da pasta local sai vazio) e as datas que mostram quando a faixa entrou na biblioteca. As faixas da
+lista negra (playlists ignoradas, #77, e faixas ignoradas, #100) também ficam fora. A lista de faixas do pacote, sozinha, já mostra o que a pessoa escuta:
 isso faz parte da ideia, e `so_biblioteca` restringe o escopo.
 
 **Formato:** um zip com `manifesto.json` e `analises.db` (SQLite só com as tabelas de `TABELAS`). O manifesto traz as

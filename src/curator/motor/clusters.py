@@ -197,7 +197,7 @@ def nome_automatico(est: dict) -> str:
 
 
 def _universo(con: sqlite3.Connection, escopo: str) -> list[str]:
-    """Faixas do escopo, sem as que têm dislike (#61) ou estão numa playlist ignorada (#77)."""
+    """Faixas do escopo, sem as que têm dislike (#61) ou estão na lista negra (#77, #100)."""
     from curator.banco import consultas
 
     if escopo == "biblioteca":
