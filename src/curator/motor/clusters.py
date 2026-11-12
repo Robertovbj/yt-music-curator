@@ -11,6 +11,15 @@ percentil 25 só do núcleo, o que deixava de fora um quarto do próprio núcleo
 
 Estabilidade: um agrupamento fica salvo. `atualizar` encaixa faixas novas nos clusters existentes pelo
 centroide; só `agrupar` (sob pedido) recalcula tudo.
+
+Playlists master (#105, `Parametros.quantas`): N grupos exatos, amplos, cobrindo todas as faixas. O HDBSCAN não
+deixa fixar N, então:
+1. Partição por consenso: Ward com N grupos sobre o UMAP de cada uma das `sementes`, uma matriz de
+   coassociação (fração das sementes em que duas faixas ficaram juntas) e ligação média sobre 1 − coassociação
+   (Monti et al., 2003; Strehl & Ghosh, 2002). Um UMAP só muda a fronteira quando a biblioteca muda pouco; o
+   consenso não (na biblioteca real, tirando 1% das faixas: ARI 0,97–0,99 contra 0,76–0,96).
+2. Fronteira: toda faixa fica na sua master e entra também na master mais próxima depois dela, se estiver quase
+   tão perto (cos ≥ cos da sua − `fronteira`) e passar do limiar τ dela (percentil 10 dos membros). No máximo duas.
 """
 
 import hashlib
@@ -39,6 +48,10 @@ class Parametros:
     percentil_limiar: float = 10
     jaccard_fusao: float = 0.6
     selecao: str = "eom"  # HDBSCAN: "eom" (o padrão) ou "leaf" (folhas da hierarquia: grupos mais parelhos)
+    # playlists master (#105): N grupos exatos por consenso, no lugar do HDBSCAN
+    quantas: int | None = None
+    sementes: tuple[int, ...] = (42, 7, 13, 21, 99)
+    fronteira: float = 0.02
 
 
 @dataclass
@@ -89,6 +102,56 @@ def particionar(Y: np.ndarray, p: Parametros) -> tuple[np.ndarray, np.ndarray]:
         copy=True,
     ).fit(Y)
     return h.labels_, h.probabilities_
+
+
+def particionar_consenso(X: np.ndarray, p: Parametros) -> np.ndarray:
+    """Partição em exatamente `p.quantas` grupos, por consenso de Ward sobre UMAPs com várias sementes.
+
+    Rótulos em ordem canônica (maior grupo primeiro; empate pelo menor índice), para não depender da numeração
+    interna do scikit-learn."""
+    from dataclasses import replace
+
+    from sklearn.cluster import AgglomerativeClustering
+
+    co = np.zeros((len(X), len(X)), np.float32)
+    for s in p.sementes:
+        Y = reduzir(X, replace(p, random_state=s))
+        lab = AgglomerativeClustering(n_clusters=p.quantas, linkage="ward").fit_predict(Y)
+        co += lab[:, None] == lab[None, :]
+    co /= len(p.sementes)
+    lab = AgglomerativeClustering(n_clusters=p.quantas, metric="precomputed", linkage="average").fit_predict(
+        1 - co
+    )
+    ordem = sorted(set(lab.tolist()), key=lambda k: (-(lab == k).sum(), int(np.flatnonzero(lab == k)[0])))
+    return np.array([ordem.index(k) for k in lab])
+
+
+def segunda_master(sims: np.ndarray, propria: int, limiares: np.ndarray, fronteira: float) -> int | None:
+    """A master mais próxima depois da `propria`, se a faixa está na fronteira (quase tão perto e acima do τ dela)."""
+    outras = sims.copy()
+    outras[propria] = -np.inf
+    k2 = int(outras.argmax())
+    if outras[k2] >= sims[propria] - fronteira and outras[k2] >= limiares[k2]:
+        return k2
+    return None
+
+
+def masters(m: espacos.Matriz, rotulos: np.ndarray, p: Parametros) -> list[Cluster]:
+    """Cada faixa na sua master (núcleo) e, na fronteira, também na segunda."""
+    ks = range(p.quantas)
+    C = np.vstack([_centroide(m.X[rotulos == k]) for k in ks])
+    S = m.X @ C.T
+    limiares = np.array([float(np.percentile(S[rotulos == k, k], p.percentil_limiar)) for k in ks])
+    membros: dict[int, dict[str, float]] = {k: {} for k in ks}
+    for i, k in enumerate(rotulos):
+        membros[k][m.ids[i]] = round(float(S[i, k]), 6)
+        if (k2 := segunda_master(S[i], k, limiares, p.fronteira)) is not None:
+            membros[k2][m.ids[i]] = round(float(S[i, k2]), 6)
+    return [
+        Cluster(k, sorted(m.ids[i] for i in np.flatnonzero(rotulos == k)), C[k], float(limiares[k]),
+                dict(sorted(membros[k].items())))
+        for k in ks
+    ]  # fmt: skip
 
 
 def _centroide(E: np.ndarray) -> np.ndarray:
@@ -226,12 +289,14 @@ def calcular(
 ) -> list[Cluster]:
     emb = espacos.embeddings(con)
     m = emb.subconjunto(_universo(con, escopo))
-    if len(m.ids) < max(2 * p.min_cluster_size, p.n_neighbors + 2):
-        raise PoucasFaixas(
-            f"só {len(m.ids)} faixa(s) analisada(s) no escopo; o mínimo é {max(2 * p.min_cluster_size, p.n_neighbors + 2)}"
-        )
-    rotulos, probs = particionar(reduzir(m.X, p), p)
-    cs = sobrepor(m, rotulos, probs, p)
+    minimo = max(2 * p.quantas if p.quantas else 2 * p.min_cluster_size, p.n_neighbors + 2)
+    if len(m.ids) < minimo:
+        raise PoucasFaixas(f"só {len(m.ids)} faixa(s) analisada(s) no escopo; o mínimo é {minimo}")
+    if p.quantas:
+        cs = masters(m, particionar_consenso(m.X, p), p)
+    else:
+        rotulos, probs = particionar(reduzir(m.X, p), p)
+        cs = sobrepor(m, rotulos, probs, p)
     for c in cs:
         c.estatisticas = descrever(con, sorted(c.membros))
         c.nome = _nome_em_cache(con, c.hash_nucleo) or nome_automatico(c.estatisticas)
@@ -313,6 +378,9 @@ def atualizar(con: sqlite3.Connection, agrupamento_id: int) -> int:
         )
     }
     novos = [v for v in emb.ids if v not in vistos]
+    p = _parametros_salvos(con, agrupamento_id)
+    if p.quantas:
+        return _encaixar_masters(con, agrupamento_id, emb, novos, p)
     inseridos = 0
     with transacao(con):
         for c in carregar(con, agrupamento_id):
@@ -322,6 +390,39 @@ def atualizar(con: sqlite3.Connection, agrupamento_id: int) -> int:
                     con.execute(
                         "INSERT OR IGNORE INTO cluster_membros (agrupamento_id, cluster_id, video_id, nucleo, similaridade) VALUES (?, ?, ?, 0, ?)",
                         (agrupamento_id, c.cluster_id, v, round(s, 6)),
+                    )
+                    inseridos += 1
+    return inseridos
+
+
+def _parametros_salvos(con: sqlite3.Connection, agrupamento_id: int) -> Parametros:
+    """Os parâmetros gravados, com os padrões para os campos que não existiam quando o agrupamento foi salvo."""
+    salvos = json.loads(
+        con.execute(
+            "SELECT parametros FROM agrupamentos WHERE agrupamento_id = ?", (agrupamento_id,)
+        ).fetchone()[0]
+    )
+    campos = {k: v for k, v in salvos.items() if k in Parametros.__dataclass_fields__}
+    if isinstance(campos.get("sementes"), list):
+        campos["sementes"] = tuple(campos["sementes"])
+    return Parametros(**campos)
+
+
+def _encaixar_masters(con, agrupamento_id: int, emb: espacos.Matriz, novos: list[str], p: Parametros) -> int:
+    """Faixa nova nas masters salvas: a mais próxima e, na fronteira, a segunda (a mesma regra da criação)."""
+    cs = carregar(con, agrupamento_id)
+    C = np.vstack([c.centroide for c in cs])
+    limiares = np.array([c.limiar for c in cs])
+    inseridos = 0
+    with transacao(con):
+        for v in novos:
+            sims = C @ emb.linha(v)
+            k = int(sims.argmax())
+            for j in (k, segunda_master(sims, k, limiares, p.fronteira)):
+                if j is not None:
+                    con.execute(
+                        "INSERT OR IGNORE INTO cluster_membros (agrupamento_id, cluster_id, video_id, nucleo, similaridade) VALUES (?, ?, ?, 0, ?)",
+                        (agrupamento_id, cs[j].cluster_id, v, round(float(sims[j]), 6)),
                     )
                     inseridos += 1
     return inseridos
@@ -353,10 +454,7 @@ def obter(con: sqlite3.Connection, escopo: str = "biblioteca", p: Parametros = P
     `reagrupar` ou parâmetros diferentes dos que ele usou."""
     aid = ultimo(con, escopo)
     if aid is not None and not reagrupar:
-        salvos = con.execute(
-            "SELECT parametros FROM agrupamentos WHERE agrupamento_id = ?", (aid,)
-        ).fetchone()[0]
-        reagrupar = json.loads(salvos) != asdict(p)
+        reagrupar = _parametros_salvos(con, aid) != p
     if aid is None or reagrupar:
         cs = calcular(con, escopo, p)
         return salvar(con, cs, escopo, p), cs, 0

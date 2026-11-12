@@ -5,6 +5,10 @@ modo "leaf" e tamanho mínimo maior, para dar poucas playlists amplas. Na biblio
 o modo padrão ("eom") juntava tudo em 2 blocos de 1.100–1.800 faixas, qualquer que fosse o tamanho mínimo; "leaf"
 com mínimo 40 deu 14 grupos de 100 a 640 faixas, cobrindo 86% das curtidas.
 
+Playlists master (#105, `quantas`): N playlists amplas, cobrindo todas as curtidas, por consenso de Ward sobre
+vários UMAPs (ver `clusters`). Na biblioteca real (12/11, 2.643 curtidas), 6 masters de 273 a 708 faixas; com a
+fronteira de 0,02, 10% das faixas entram em duas.
+
 O plano só CRIA playlists novas: nenhuma existente é lida nem alterada. Quando aplicado, as criadas ficam
 marcadas como gerais (`playlists.geral`), e `curator classificar --nas-gerais` passa a encaixar nelas as
 curtidas novas.
@@ -21,8 +25,20 @@ PARAMETROS = Parametros(min_cluster_size=40, selecao="leaf")
 ORIGEM = "gerais"
 
 
-def parametros(min_cluster: int | None = None) -> Parametros:
-    return PARAMETROS if min_cluster is None else replace(PARAMETROS, min_cluster_size=min_cluster)
+def parametros(
+    min_cluster: int | None = None, quantas: int | None = None, fronteira: float | None = None
+) -> Parametros:
+    """Os das gerais; com `quantas`, as playlists master (#105)."""
+    p = PARAMETROS if min_cluster is None else replace(PARAMETROS, min_cluster_size=min_cluster)
+    if quantas is not None:
+        if not 2 <= quantas <= 20:
+            raise ValueError("quantas: de 2 a 20 playlists")
+        p = replace(p, quantas=quantas)
+    if fronteira is not None:
+        if not 0 <= fronteira <= 0.2:
+            raise ValueError("fronteira: de 0 a 0,2")
+        p = replace(p, fronteira=fronteira)
+    return p
 
 
 def obter(

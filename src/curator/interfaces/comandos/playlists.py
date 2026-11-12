@@ -98,9 +98,23 @@ def sugerir(
         "--min-cluster",
         help="Tamanho mínimo de cada playlist geral (padrão 40; menor = mais playlists).",
     ),
+    quantas: int | None = typer.Option(
+        None,
+        "--quantas",
+        help="Playlists master (#105): exatamente N playlists amplas, cobrindo todas as curtidas.",
+    ),
+    fronteira: float | None = typer.Option(
+        None,
+        "--fronteira",
+        help="Com --quantas: quanto mais longe da própria master uma faixa pode estar para entrar também na "
+        "segunda (padrão 0,02; 0 = só quem está mais perto da outra).",
+    ),
     plano: bool = typer.Option(False, "--plano", help="Gera um plano que cria as playlists gerais."),
 ) -> None:
     """Playlists gerais a partir de TODAS as curtidas, ignorando as playlists que existem (#80).
+
+    Com --quantas N, as playlists master (#105): N grupos exatos por consenso de vários UMAPs (cerca de 1 minuto);
+    cada faixa fica na sua e, na fronteira, também na segunda.
 
     Só a matemática do projeto (clusters sobrepostos): o plano só cria playlists novas e não toca nas suas.
     Depois de aplicado, `curator classificar --nas-gerais` encaixa nelas as curtidas novas."""
@@ -110,20 +124,32 @@ def sugerir(
     from curator.motor import gerais
 
     con = banco()
-    typer.echo("agrupando as curtidas (UMAP + HDBSCAN)…", err=True)
     try:
-        aid, cs, novos = gerais.obter(con, gerais.parametros(min_cluster), reagrupar)
+        p = gerais.parametros(min_cluster, quantas, fronteira)
+    except ValueError as e:
+        falhar(str(e))
+    typer.echo(
+        f"agrupando as curtidas ({'consenso de UMAP + Ward' if p.quantas else 'UMAP + HDBSCAN'})…", err=True
+    )
+    try:
+        aid, cs, novos = gerais.obter(con, p, reagrupar)
     except clusters.PoucasFaixas as e:
         falhar(str(e))
     if novos:
         typer.echo(f"{novos} curtida(s) nova(s) encaixada(s) nos clusters #{aid}", err=True)
     cobertas = {v for c in cs for v in c.membros}
     total = len(clusters._universo(con, clusters.CURTIDAS))
+    tipo = "master" if p.quantas else "geral(is)"
     typer.echo(
-        f"agrupamento #{aid}: {len(cs)} playlist(s) geral(is), cobrindo {len(cobertas)} de {total} curtidas"
+        f"agrupamento #{aid}: {len(cs)} playlist(s) {tipo}, cobrindo {len(cobertas)} de {total} curtidas"
     )
+    if p.quantas:
+        duas = sum(len(c.membros) for c in cs) - len(cobertas)
+        fr = f"{p.fronteira:g}".replace(".", ",")
+        typer.echo(f"  {duas} faixa(s) na fronteira, em duas masters (--fronteira {fr})")
     for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
-        typer.echo(f"  [{c.cluster_id}] {c.nome} — {len(c.membros)} faixa(s)")
+        extra = f" (+{len(c.membros) - len(c.nucleo)} da fronteira)" if p.quantas else ""
+        typer.echo(f"  [{c.cluster_id}] {c.nome} — {len(c.membros)} faixa(s){extra}")
     typer.echo('renomeie antes do plano com `curator clusters renomear N "nome" --gerais`', err=True)
     if plano:
         try:
