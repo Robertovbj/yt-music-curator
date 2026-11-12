@@ -449,6 +449,7 @@ Porte de `yt-classifier/teste.py` (modelos e `CUSTOM_GENRES` em `:44-80`, `Analy
 | `sincronizar [--forcar]` | Curtidas, playlists próprias, pertencimento e metadados |
 | `hierarquia aplicar/mostrar` | Lê o `hierarquia.toml` e mostra a árvore |
 | `analisar [--limite N]` | Roda o worker da fila (download e Essentia) |
+| `agenda ligar/desligar/status` | Tarefas diárias **opcionais** no systemd do usuário (#103): `sincronizar` (00:45) e `analisar` (01:30). Nada é agendado sem `ligar`. Os arquivos gerados apontam para o clone e o `uv` de quem ligou. Uma unidade instalada à mão só é substituída com `--forcar`. O `sincronizar` tem trava própria (`sincronizar.lock`): o timer e uma rodada manual não rodam juntos, mas ele roda junto com o worker |
 | `fila status` | Pendentes, erros, quarentenas e estimativa |
 | `classificar [--mae X]` | ADR-06; gera um plano |
 | `receita criar/executar/listar` | ADR-05 |

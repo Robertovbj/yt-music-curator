@@ -182,11 +182,12 @@ def restaurar(arquivo: Path, c: Caminhos, forcar: bool = False) -> Restauracao:
     if c.banco.exists():
         from curator.audio.trava import OutroWorkerRodando, trava_worker
 
-        try:
-            with trava_worker(c.dados_dir / "worker.lock"):
-                pass
-        except OutroWorkerRodando as e:
-            raise BackupInvalido(f"{e}: pare o worker antes de restaurar por cima do banco") from e
+        for trava, quem in (("worker.lock", "o worker"), ("sincronizar.lock", "a sincronização")):
+            try:
+                with trava_worker(c.dados_dir / trava, quem=quem):
+                    pass
+            except OutroWorkerRodando as e:
+                raise BackupInvalido(f"{e}: pare {quem} antes de restaurar por cima do banco") from e
 
     r = Restauracao(manifesto=manifesto)
     sufixo = ".antes-da-restauracao-" + datetime.now().strftime("%Y%m%d-%H%M%S")
