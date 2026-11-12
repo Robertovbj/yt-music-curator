@@ -91,7 +91,17 @@ intervalo_max_s = 60
 caminho = "~/Música"   # depois: uv run curator pasta-local
 ```
 
-Para rodar todo dia em segundo plano, veja `contrib/systemd/`.
+**Todo dia em segundo plano (opcional).** Nada é agendado até você ligar. O `curator agenda` instala os timers no systemd do usuário (sem root), apontando para este clone e para o seu `uv`:
+
+```sh
+uv run curator agenda ligar sincronizar           # todo dia às 00:45 (--hora HH:MM para mudar)
+uv run curator agenda ligar analisar              # lote de análise às 01:30, depois da sincronização
+uv run curator agenda status                      # o que está ligado, próxima e última execução
+uv run curator agenda desligar sincronizar        # desativa e apaga os arquivos
+uv run curator agenda ligar sincronizar --mostrar # só mostra os arquivos, sem instalar
+```
+
+A sincronização agendada é a mesma do `curator sincronizar`: as curtidas novas entram na fila e o lote da madrugada já as analisa. Uma sincronização manual enquanto a do timer roda é recusada (e vice-versa). Logs: `journalctl --user -u curator-sincronizar`. Os arquivos de exemplo continuam em `contrib/systemd/`, para quem preferir instalar à mão.
 
 **Guardar os áudios (experimental).** Por padrão o áudio é apagado depois da análise. Enquanto o projeto muda (um modelo novo reabre a fila inteira), dá para guardá-los e reanalisar sem baixar de novo: a faixa com áudio guardado é analisada sem rede, sem cota e sem pausa. Na média são 1,6 MB por faixa.
 

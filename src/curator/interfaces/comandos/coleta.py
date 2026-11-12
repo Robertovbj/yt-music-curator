@@ -7,6 +7,10 @@ from curator.interfaces.cli import app
 from curator.interfaces.comandos.auth import cliente
 from curator.interfaces.comum import aviso, banco
 
+TRAVA = (
+    "sincronizar.lock"  # uma sincronização por vez: o timer da agenda e uma manual não rodam juntos (#103)
+)
+
 
 def imprimir_resumo(titulo: str, resumo) -> None:
     partes = ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in resumo.contagens.items()) or "nada a fazer"
@@ -28,6 +32,17 @@ def sincronizar(
     ),
 ) -> None:
     """Curtidas, playlists próprias, pertencimento, metadados de álbum, estatísticas e metadados externos."""
+    from curator.audio.trava import OutroWorkerRodando, trava_worker
+    from curator.config import caminhos
+
+    try:
+        with trava_worker(caminhos().dados_dir / TRAVA, quem="outro `curator sincronizar`"):
+            _sincronizar(forcar, sem_metadados, sem_fila, sem_estatisticas, sem_externos)
+    except OutroWorkerRodando as e:
+        typer.echo(f"{e}; nada a fazer.")  # código 0: o timer da agenda (#103) não registra falha
+
+
+def _sincronizar(forcar, sem_metadados, sem_fila, sem_estatisticas, sem_externos) -> None:
     from curator.coleta.sincronizar import (
         completar_estatisticas,
         completar_metadados,

@@ -1,4 +1,5 @@
-# Lote diário de download + análise: roda até esgotar a cota do dia ([fila] cota_diaria). Instalação (usuário, sem root):
+# Lote diário de download + análise: roda até esgotar a cota do dia ([fila] cota_diaria).
+# Mais simples: `uv run curator agenda ligar analisar` gera e instala estes arquivos (#103). À mão (usuário, sem root):
 #   cp contrib/systemd/curator-analisar.* ~/.config/systemd/user/
 #   (ajuste WorkingDirectory para a pasta do clone e o PATH para onde estiver o uv)
 #   systemctl --user daemon-reload && systemctl --user enable --now curator-analisar.timer
