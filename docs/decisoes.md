@@ -328,6 +328,13 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 **Recategorizar uma mãe (#74, 04/11):** `curator reorganizar --mae X --recategorizar` refaz as filhas de X pelo som, quando o usuário pede aquela playlist. As filhas atuais não servem de referência: cada cluster (HDBSCAN "leaf", mínimo 12; no Rock - All, 5 grupos de 14 a 80 faixas cobrindo 88% das 171) vira uma filha nova, e as antigas são esvaziadas. Nada sai da mãe. O plano é aplicado pelo usuário; ao aplicar, as novas ganham `mae_id` = X e a CLI imprime os blocos para o `hierarquia.toml`. Parâmetros diferentes dos do último agrupamento do escopo recalculam os clusters.
 
+**Playlists master (#105, 12/11):** `curator playlists sugerir --quantas N` separa as curtidas em exatamente N playlists amplas, cobrindo todas. É o primeiro passo da organização pedido pelo usuário (6 masters).
+- *Por que não o HDBSCAN:* ele não deixa fixar N. Com "leaf" e mínimo 40 deu 14 gerais, três quase iguais; com "eom", 2 ou 3 blocos. Gênero-pai também não serve de base: 765 curtidas não passam de 0,8 em nenhum pai, e as trilhas de jogo se espalham por Classical, Electronic e Stage & Screen.
+- *Partição por consenso:* Ward (1963) com N grupos sobre o UMAP de 10-d de cada uma de 5 sementes, uma matriz de coassociação (fração das sementes em que duas faixas ficaram juntas) e ligação média sobre 1 − coassociação (acúmulo de evidências: Fred & Jain, 2005; consenso: Monti et al., 2003; Strehl & Ghosh, 2002). Um UMAP só, com a biblioteca mudando pouco, mexia na fronteira: tirando 1% das faixas, ARI de 0,76 a 0,96 com o agrupamento completo; com o consenso, de 0,97 a 0,99. Ward direto no EffNet, sem UMAP, foi pior (0,64–0,78) e com silhueta menor. O custo é ~1 minuto, só na criação.
+- *Fronteira:* cada faixa fica na sua master (o núcleo) e entra também na master mais próxima depois dela se estiver quase tão perto (cos ≥ cos da sua − 0,02, `--fronteira`) e acima do τ dela (percentil 10 dos membros). No máximo duas. Escolha do usuário entre "cada faixa numa só", "só nas fronteiras" e a sobreposição das gerais. A das gerais, com grupos tão amplos, punha metade das curtidas em duas ou mais.
+- *Curtidas novas:* antes do plano, `sugerir` encaixa as novas pela mesma regra (a mais próxima e, na fronteira, a segunda). Depois de aplicado, as masters são gerais, e o `classificar --nas-gerais` (ADR-06) segue valendo.
+- *Na biblioteca real (2.643 curtidas):* 6 masters com núcleos de 273 a 708 faixas e 347 faixas (13%) em duas. Duas são de trilhas de jogo (calmas e orquestrais × com mais movimento), uma de pop e rap ocidentais, uma de J-pop e VTubers, uma de J-rock e anime e uma de rock e metal.
+
 ## ADR-08: Obtenção de áudio sem bloqueio
 
 **Requisito:** sempre a **faixa inteira**. Ordem de tentativas: YouTube direto → YouTube por proxies → outros provedores sem DRM.
@@ -813,3 +820,7 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - Geifman, Y., & El-Yaniv, R. (2017). *Selective Classification for Deep Neural Networks*. NeurIPS 2017.
 - Scheirer, W. J., de Rezende Rocha, A., Sapkota, A., & Boult, T. E. (2013). *Toward Open Set Recognition*. IEEE Transactions on Pattern Analysis and Machine Intelligence, 35(7), 1757–1772.
 - Sturm, B. L. (2014). *A simple method to determine if a music information retrieval system is a "horse"*. IEEE Transactions on Multimedia, 16(6), 1636–1644. doi:10.1109/TMM.2014.2330697.
+- Ward, J. H. (1963). *Hierarchical Grouping to Optimize an Objective Function*. Journal of the American Statistical Association, 58(301), 236–244.
+- Strehl, A., & Ghosh, J. (2002). *Cluster Ensembles — A Knowledge Reuse Framework for Combining Multiple Partitions*. Journal of Machine Learning Research, 3, 583–617.
+- Monti, S., Tamayo, P., Mesirov, J., & Golub, T. (2003). *Consensus Clustering: A Resampling-Based Method for Class Discovery and Visualization of Gene Expression Microarray Data*. Machine Learning, 52(1–2), 91–118.
+- Fred, A. L. N., & Jain, A. K. (2005). *Combining Multiple Clusterings Using Evidence Accumulation*. IEEE Transactions on Pattern Analysis and Machine Intelligence, 27(6), 835–850.

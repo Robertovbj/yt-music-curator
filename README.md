@@ -192,11 +192,14 @@ Requer o extra `organizar` (UMAP, scikit-learn, Plotly): `uv sync --extra analis
 uv run curator playlists sugerir --plano   # playlists gerais de TODAS as curtidas, ignorando as que existem
 uv run curator clusters renomear 3 "Rock de estrada" --gerais   # dê nomes antes de aplicar o plano
 uv run curator playlists sugerir --min-cluster 25 --reagrupar   # mais playlists, menores
+uv run curator playlists sugerir --quantas 6 --plano   # playlists master: exatamente 6, cobrindo todas as curtidas
 uv run curator reorganizar --mae "Rock - All" --plano    # dentro de uma playlist sua: criar, completar, fundir, dividir
 uv run curator reorganizar --mae "Rock - All" --recategorizar --plano   # refaz as filhas pelo som
 uv run curator clusters mostrar --gerais   # estatísticas de cada cluster
 uv run curator visualizar --abrir          # ~/.local/share/yt-music-curator/mapa.html, abre offline
 ```
+
+**Playlists master.** Com `--quantas N`, o `playlists sugerir` separa as curtidas em exatamente N playlists amplas pelo som. Cada música fica na sua master e, quando está na fronteira entre duas (quase tão perto de uma quanto da outra), entra nas duas: `--fronteira` (padrão 0,02; 0 = só quem está mais perto da outra). Leva cerca de 1 minuto, porque faz o agrupamento com 5 sementes e fica com o consenso, que muda pouco quando a biblioteca muda. Elas valem como gerais: depois do plano aplicado, o `classificar --nas-gerais` encaixa nelas as curtidas novas.
 
 As playlists que já existem nunca servem de base: o `playlists sugerir` olha só as curtidas, e o plano dele só cria playlists novas. Depois de aplicado, as criadas ficam marcadas como gerais, e a cada leva de curtidas novas o `classificar --nas-gerais` sugere em qual delas cada uma entra. `classificar` e `reorganizar` só mexem nas playlists que você nomear. O `--recategorizar` cria uma filha nova por cluster e esvazia as filhas antigas (o que sai delas continua na mãe); depois de aplicar o plano, o comando imprime as linhas para o `hierarquia.toml`.
 

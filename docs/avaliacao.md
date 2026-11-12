@@ -335,3 +335,25 @@ Faixas sem rótulo com nota ≥ 0,8, no total e entre as trilhas:
   - **Electronic:** entram trilhas (HOYO-MiX, Lorien Testard) e saem 149, entre elas pop de idol e Katy Perry.
 - **Decisão do usuário:** a régua aprendida entra nas receitas no Hip Hop e no Pop (motor v3). Rock e Electronic seguem na v2.
 - **Custo:** a avaliação inteira, com os 4 modelos, as 10 dobras e a guarda, leva ~5 s.
+
+## Playlists master (#105)
+
+Pedido de 12/11: as curtidas em 6 a 8 playlists amplas. Cópia do banco de 12/11, 2.643 curtidas analisadas (fora as ignoradas). Scripts de exploração fora do repositório; o resultado final sai de `curator playlists sugerir --quantas 6`.
+
+**Gerais da #80 e gênero-pai.** As gerais (HDBSCAN "leaf", mínimo 40) dão 14 playlists, três delas "Soundtrack / Ambient · calmo", e deixam 405 curtidas de fora. Com "eom" e mínimo 80, 120 ou 200: 2, 3 e 2 grupos. Pela régua de gênero das receitas, 765 curtidas não passam de 0,8 em nenhum pai e 365 passam em dois ou mais; as trilhas se dividem entre Classical, Electronic e Stage & Screen.
+
+**N fixo.** Ward sobre o UMAP de 10-d (o mesmo das gerais), N = 6, 7 e 8:
+
+| | estabilidade (ARI) | silhueta (cos, EffNet) |
+|---|---|---|
+| Ward no UMAP, outra semente (k = 6 / 7 / 8) | 0,94 / 0,94 / 0,86 | — |
+| Ward no UMAP, tirando 1% das faixas (k = 6, 4 sorteios) | 0,76–0,96 | 0,195 |
+| Ward direto no EffNet, tirando 1% (k = 6) | 0,64–0,78 | 0,173 |
+| **Consenso de 5 sementes, tirando 1% (k = 6, 3 sorteios)** | **0,97–0,99** | 0,187 |
+
+Com 7, sai um grupo de ~105 faixas de J-pop mais enérgico; com 8, também um de ~154 faixas orquestrais. O usuário escolheu 6.
+
+**Sobreposição.** A regra das gerais (percentil 10 do próprio grupo) incha grupos amplos: metade das curtidas em dois ou mais, e o J-pop de 410 para 1.085. A da fronteira (segunda master só se cos ≥ cos da própria − δ e acima do τ dela), com um UMAP só: δ = 0 → 7%, 0,01 → 8%, 0,02 → 10%, 0,03 → 12%, 0,05 → 15%. Com a partição por consenso e δ = 0,02: 347 faixas (13%) em duas.
+
+**As 6 (núcleo + fronteira).** Trilhas calmas e orquestrais (HOYO-MiX, Lorien Testard, Yu-Peng Chen; energia 0,11, 100 BPM) 708 + 45 · pop e rap ocidentais (Melanie Martinez, Alec Benjamin, Sasha Alex Sloan) 608 + 77 · J-pop e VTubers (Hoshimachi Suisei, YOASOBI, Reol, Ado) 407 + 62 · trilhas com mais movimento (HOYO-MiX, Masayoshi Soken, MONACA; 133 BPM) 369 + 70 · J-rock e anime (kessoku band, ClariS, TrySail) 273 + 54 · rock e metal (BABYMETAL, Sabaton, Linkin Park) 278 + 39. Os nomes automáticos erram (o pop ocidental sai como "K-pop", pelos estilos do Discogs), então os nomes são do usuário.
+

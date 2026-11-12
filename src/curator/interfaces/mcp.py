@@ -52,6 +52,8 @@ e NUNCA sugira mexer numa delas sem ele nomear qual. Por isso:
 - "sugira playlists" / "organize minhas curtidas" sem citar playlist → sugerir_playlists_gerais (clusters de todas
   as curtidas, ignorando as playlists que existem; o plano só cria playlists novas). Dê nomes melhores com
   renomear_cluster(gerais=True) a partir das estatísticas, antes de criar_plano_das_gerais.
+- "separe minhas curtidas em N playlists" / "playlists master" → sugerir_playlists_gerais(quantas=N) e o
+  criar_plano_das_gerais com o mesmo quantas (#105).
 - "reorganize a playlist X" → sugerir_reorganizacao(mae=X). Faixas ainda não analisadas ficam de fora de tudo
 (o worker analisa ~500 por dia); diga isso quando 'sem_analise' for grande.
 Escalas: features em 0..1 (bpm em BPM); valence/arousal 0..1. Estilos, humores e instrumentos são saídas dos
@@ -501,16 +503,23 @@ def classificar_nao_alocadas(
     }
 
 
-def sugerir_playlists_gerais(reagrupar: bool = False, min_cluster: int | None = None) -> dict:
+def sugerir_playlists_gerais(
+    reagrupar: bool = False,
+    min_cluster: int | None = None,
+    quantas: int | None = None,
+    fronteira: float | None = None,
+) -> dict:
     """Playlists gerais a partir de TODAS as curtidas, ignorando as playlists existentes (clusters sobrepostos).
 
-    `min_cluster` menor dá mais playlists (padrão 40). Dê nomes com renomear_cluster(gerais=True) antes do plano."""
+    `min_cluster` menor dá mais playlists (padrão 40). `quantas` = N dá as playlists master (#105): exatamente N
+    playlists amplas cobrindo todas as curtidas; cada faixa na sua e, na fronteira (`fronteira`, padrão 0,02), também
+    na segunda. Leva cerca de 1 minuto. Dê nomes com renomear_cluster(gerais=True) antes do plano."""
     from curator.motor import clusters, gerais
 
     con = banco()
     try:
-        aid, cs, novos = gerais.obter(con, gerais.parametros(min_cluster), reagrupar)
-    except clusters.PoucasFaixas as e:
+        aid, cs, novos = gerais.obter(con, gerais.parametros(min_cluster, quantas, fronteira), reagrupar)
+    except (clusters.PoucasFaixas, ValueError) as e:
         return {"erros": [str(e)]}
     return {
         "agrupamento": aid,
@@ -522,6 +531,7 @@ def sugerir_playlists_gerais(reagrupar: bool = False, min_cluster: int | None = 
                 "cluster_id": c.cluster_id,
                 "nome": c.nome,
                 "faixas": len(c.membros),
+                "da_fronteira": len(c.membros) - len(c.nucleo) if quantas else None,
                 "estatisticas": c.estatisticas,
             }
             for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id))
@@ -529,13 +539,16 @@ def sugerir_playlists_gerais(reagrupar: bool = False, min_cluster: int | None = 
     }
 
 
-def criar_plano_das_gerais(min_cluster: int | None = None) -> dict:
-    """Plano (não aplicado) que CRIA as playlists gerais do último agrupamento. Não toca nenhuma playlist existente."""
+def criar_plano_das_gerais(
+    min_cluster: int | None = None, quantas: int | None = None, fronteira: float | None = None
+) -> dict:
+    """Plano (não aplicado) que CRIA as playlists gerais do último agrupamento. Não toca nenhuma playlist existente.
+    Use os mesmos `min_cluster`/`quantas`/`fronteira` do sugerir_playlists_gerais (outros recalculam)."""
     from curator.motor import clusters, gerais
 
     con = banco()
     try:
-        aid, cs, _ = gerais.obter(con, gerais.parametros(min_cluster))
+        aid, cs, _ = gerais.obter(con, gerais.parametros(min_cluster, quantas, fronteira))
         return mostrar_plano(gerais.plano(con, aid, cs))
     except (clusters.PoucasFaixas, ValueError) as e:
         return {"erros": [str(e)]}
