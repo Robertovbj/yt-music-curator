@@ -120,6 +120,19 @@ def test_sementes_puxam_o_estilo_das_sementes(con):
     assert all(v.startswith("rap") for v in executar(con, r).ids)
 
 
+def test_componente_das_sementes_usa_a_regua_da_biblioteca(con):
+    # v4: 0 = as faixas da biblioteca menos parecidas com as sementes, 1 = o centroide; não mais (cos + 1) / 2
+    r = Receita(
+        nome="parecidas", tamanho=1000, sementes=["rap01", "rap02"],
+        diversidade={"lambda": 1.0, "max_por_artista": None},
+    )  # fmt: skip
+    comp = {i.video_id: i.componentes["sementes"] for i in executar(con, r).itens}
+    assert min(comp.values()) == 0.0 and max(comp.values()) > 0.9
+    assert min(v for k, v in comp.items() if k.startswith("rap")) > max(
+        v for k, v in comp.items() if not k.startswith("rap")
+    )
+
+
 def test_limite_por_artista_e_universo_playlist(con):
     r = Receita(nome="x", tamanho=50, universo="PLrock", diversidade={"max_por_artista": 2})
     e = executar(con, r)

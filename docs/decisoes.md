@@ -260,6 +260,7 @@ Exemplo de receita para "pra dormir, sem Hoyoverse":
    - `score = w₁ · sim_perfil + w₂ · sim_sementes + w₃ · afinidade_gêneros`
    - `sim_perfil` é a distância ponderada ao perfil-alvo no espaço interpretável.
    - `sim_sementes` é o cosseno até o centroide das sementes no espaço de embedding, como na consulta por centroide de Rocchio (1971).
+     No score ele entra de 0 a 1 na régua da biblioteca: 0 é o cosseno do percentil 1 das faixas da biblioteca (as menos parecidas com as sementes), 1 é o próprio centroide. Até a v3 do motor era `(cos + 1) / 2`, que só andava de 0,63 a 0,93 (docs/avaliacao.md, "Escala das sementes").
 4. **Ordenação total:** por `score` decrescente, com desempate por `video_id`. Nenhuma etapa usa aleatoriedade.
 5. **Diversidade:** MMR (Carbonell & Goldstein, 1998) com λ fixo e `max_por_artista`, para não sair "10 músicas do mesmo álbum".
 6. **Corte** em `tamanho`.

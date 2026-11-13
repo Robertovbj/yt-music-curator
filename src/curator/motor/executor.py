@@ -17,6 +17,10 @@ a versão do algoritmo e o hash das escritas das candidatas quando a receita usa
 v3 (#101): nos gêneros de `generos.REGUA_APRENDIDA` (Hip Hop e Pop), `genero_pai_min` usa a régua aprendida com os
 rótulos do usuário (ADR-17), com portão e guarda. Mudar esse conjunto pede um `VERSAO_MOTOR` novo, e a versão do banco
 da execução já leva o hash dos rótulos.
+v4: a componente das sementes passou a ir de 0 (a faixa da biblioteca menos parecida com elas) a 1 (igual ao
+centroide). Antes era (cos + 1) / 2, que supõe cossenos de −1 a 1; neste embedding eles ficam acima de ~0,2, e a
+componente só andava de 0,63 a 0,93: ficar longe das sementes custava um terço do que custava ficar longe do
+perfil-alvo, e os `pesos` não valiam o que diziam (docs/avaliacao.md).
 """
 
 import json
@@ -32,7 +36,8 @@ from curator.motor import espacos, generos, popularidade
 from curator.motor.receita import POPULARIDADE, Receita, resolver_playlist, validar
 from curator.texto import normalizar
 
-VERSAO_MOTOR = "3"
+VERSAO_MOTOR = "4"
+PERCENTIL_PISO = 1.0  # o cosseno com as sementes que vale 0: este percentil na biblioteca (fora os extremos)
 
 
 @dataclass
@@ -167,7 +172,8 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     meta = _metadados(con, cand)
     esc_todas = espacos.escalares(con)
     # média/desvio sobre a biblioteca analisada (sem dislikes nem faixas de fora): candidatas não mexem na régua
-    _, media, desvio = espacos.zscore(esc_todas.subconjunto(espacos.da_biblioteca(con)).X)
+    da_biblioteca = espacos.da_biblioteca(con)
+    _, media, desvio = espacos.zscore(esc_todas.subconjunto(da_biblioteca).X)
     esc = esc_todas.subconjunto(cand)
     col = {c: i for i, c in enumerate(esc.colunas)}
     probs = _Probs(con, cand)
@@ -289,7 +295,11 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
         todas = espacos.embeddings(con)
         centro = np.mean([todas.linha(s) for s in r.sementes], axis=0)
         centro /= np.linalg.norm(centro) or 1
-        comps["sementes"], pesos["sementes"] = (E @ centro + 1) / 2, r.pesos.sementes
+        # régua da biblioteca, como o z-score do perfil: candidatas de fora não mexem no piso
+        na_biblioteca = todas.subconjunto(da_biblioteca).X @ centro
+        piso = float(np.percentile(na_biblioteca, PERCENTIL_PISO)) if len(na_biblioteca) else -1.0
+        comps["sementes"] = np.clip((E @ centro - piso) / max(1 - piso, 1e-6), 0, 1)
+        pesos["sementes"] = r.pesos.sementes
     rotulos = dict(r.generos_preferidos) or {rot: 1.0 for rot in f.generos_min}
     pais = {} if r.generos_preferidos else dict.fromkeys(f.genero_pai_min, 1.0)
     if rotulos or pais:

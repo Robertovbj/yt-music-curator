@@ -104,7 +104,7 @@ def test_receita_fica_na_v2_ate_a_aprendida_ser_adotada(con, monkeypatch):
                         "diversidade": {"lambda": 1.0, "max_por_artista": None}})  # fmt: skip
     hoje = executar(con, receita)
     assert not set(DISFARCADAS) & set(hoje.ids) and "+rotulos:" not in hoje.versao_banco
-    assert hoje.versao_motor == VERSAO_MOTOR == "3"
+    assert hoje.versao_motor == VERSAO_MOTOR == "4"
     monkeypatch.setattr(generos, "REGUA_APRENDIDA", frozenset({"Rock"}))
     ex = executar(con, carregar({"nome": "rock", "tamanho": 100, "filtros": {"genero_pai_min": {"Rock": 0.8}},
                                  "diversidade": {"lambda": 1.0, "max_por_artista": None}}))  # fmt: skip
@@ -289,4 +289,4 @@ def test_hip_hop_e_pop_usam_a_aprendida_e_os_outros_a_v2(con):
     rap = executar(
         con, carregar({"nome": "rap", "tamanho": 50, "filtros": {"genero_pai_min": {"Hip Hop": 0.8}}})
     )
-    assert rap.versao_banco.endswith("+rotulos:" + aprendido.hash_rotulos(con)) and rap.versao_motor == "3"
+    assert rap.versao_banco.endswith("+rotulos:" + aprendido.hash_rotulos(con)) and rap.versao_motor == "4"
