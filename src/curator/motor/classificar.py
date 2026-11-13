@@ -85,16 +85,24 @@ def _centroide(E: np.ndarray) -> np.ndarray:
 
 
 def limiar_loo(E: np.ndarray, k: int = K, alfa: float = ALFA, percentil: float = PERCENTIL) -> float:
-    scores = []
-    for i in range(len(E)):
-        resto = np.delete(E, i, axis=0)
-        scores.append(_score(E[i], resto, _centroide(resto), k, alfa))
-    return float(np.percentile(scores, percentil))
+    """O percentil dos scores que os membros recebem quando retirados, um de cada vez. Todos de uma vez: uma
+    matriz de cossenos sem a diagonal dá os vizinhos, e a soma menos a própria linha dá o centroide dos outros."""
+    n = len(E)
+    if n < 2:
+        return -1.0  # sem os outros não há score (como `_score` com a playlist vazia)
+    sims = E @ E.T
+    np.fill_diagonal(sims, -np.inf)
+    kk = min(k, n - 1)
+    vizinhos = np.partition(sims, n - kk, axis=1)[:, n - kk :].mean(axis=1)
+    outros = E.sum(axis=0) - E
+    outros /= np.where((norma := np.linalg.norm(outros, axis=1, keepdims=True)) == 0, 1, norma)
+    return float(np.percentile(alfa * vizinhos + (1 - alfa) * (E * outros).sum(axis=1), percentil))
 
 
 def perfis(con: sqlite3.Connection, k: int = K, alfa: float = ALFA, percentil: float = PERCENTIL,
-           sem: set[str] | None = None) -> tuple[dict[str, Perfil], list[tuple[str, int]]]:  # fmt: skip
-    """Perfil de cada playlist própria com membros analisados suficientes. `sem` tira faixas (avaliação)."""
+           sem: set[str] | None = None, so: list[str] | None = None) -> tuple[dict[str, Perfil], list[tuple[str, int]]]:  # fmt: skip
+    """Perfil de cada playlist própria com membros analisados suficientes. `sem` tira faixas (avaliação); `so`
+    restringe às playlists dadas e às descendentes delas."""
     emb = espacos.embeddings(con)
     sem = (sem or set()) | consultas.bloqueadas(con)  # dislikes e ignoradas não puxam o centroide
     pl = con.execute(
@@ -114,6 +122,9 @@ def perfis(con: sqlite3.Connection, k: int = K, alfa: float = ALFA, percentil: f
     membros_de = defaultdict(set)
     for pid, vid in con.execute("SELECT playlist_id, video_id FROM playlist_faixas"):
         membros_de[pid].add(vid)
+    if so is not None:
+        pedidas = {d for raiz in so for d in descendentes(raiz)}
+        pl = [p for p in pl if p["playlist_id"] in pedidas]
     out, frias = {}, []
     for p in pl:
         pid = p["playlist_id"]
@@ -272,7 +283,8 @@ def avaliar(con: sqlite3.Connection, mae: str | None = None, k: int = K, alfa: f
     """Leave-one-out: cada membro é tirado de todas as playlists e classificado; compara com onde ele estava."""
     emb = espacos.embeddings(con)
     raizes = _raizes(con, mae)
-    base, _ = perfis(con, k, alfa, percentil)
+    so = [mae] if mae else None  # com mãe, só ela e as descendentes entram na decisão
+    base, _ = perfis(con, k, alfa, percentil, so=so)
     folhas = {pid for pid, p in base.items() if not p.filhas}
     escopo = folhas if mae is None else {f for f in folhas if f in set(_descendentes_de(base, mae))}
     verdade = defaultdict(set)
@@ -283,7 +295,7 @@ def avaliar(con: sqlite3.Connection, mae: str | None = None, k: int = K, alfa: f
     for vid in sorted(verdade):
         if vid not in emb.indice:
             continue
-        ps, _ = perfis(con, k, alfa, percentil, sem={vid})
+        ps, _ = perfis(con, k, alfa, percentil, sem={vid}, so=so)
         d = decidir(emb.linha(vid), vid, ps, raizes, k, alfa)
         prev = {x.playlist_id for x in d.destinos} & escopo
         for pid in prev:
