@@ -16,6 +16,7 @@ import sqlite3
 import numpy as np
 
 from curator.banco import consultas
+from curator.banco.consultas import EM_LISTA, lista
 
 # nome na receita → `faixas.tipo_video` (videoType do YouTube Music sem MUSIC_VIDEO_TYPE_)
 TIPOS_VIDEO = {
@@ -31,14 +32,12 @@ NOMES_TIPOS = {v: k for k, v in TIPOS_VIDEO.items()}
 
 def _log_visualizacoes(con: sqlite3.Connection, ids: list[str]) -> dict[str, float]:
     out = {}
-    for i in range(0, len(ids), 900):
-        lote = ids[i : i + 900]
-        for vid, n in con.execute(
-            f"SELECT video_id, visualizacoes FROM faixas WHERE visualizacoes IS NOT NULL "
-            f"AND video_id IN ({','.join('?' * len(lote))})",
-            lote,
-        ):
-            out[vid] = float(np.log10(max(int(n), 0) + 1))
+    for vid, n in con.execute(
+        f"SELECT video_id, visualizacoes FROM faixas WHERE visualizacoes IS NOT NULL "
+        f"AND video_id IN {EM_LISTA}",
+        (lista(ids),),
+    ):
+        out[vid] = float(np.log10(max(int(n), 0) + 1))
     return out
 
 
@@ -70,12 +69,10 @@ DESVIO = float(1 / np.sqrt(12))
 def tipos(con: sqlite3.Connection, ids: list[str]) -> dict[str, str | None]:
     """video_id → nome legível do tipo do vídeo (None sem informação; o código cru se for um tipo novo)."""
     out = dict.fromkeys(ids)
-    for i in range(0, len(ids), 900):
-        lote = ids[i : i + 900]
-        for vid, t in con.execute(
-            f"SELECT video_id, tipo_video FROM faixas WHERE video_id IN ({','.join('?' * len(lote))})", lote
-        ):
-            out[vid] = NOMES_TIPOS.get(t, t) if t else None
+    for vid, t in con.execute(
+        f"SELECT video_id, tipo_video FROM faixas WHERE video_id IN {EM_LISTA}", (lista(ids),)
+    ):
+        out[vid] = NOMES_TIPOS.get(t, t) if t else None
     return out
 
 
@@ -84,13 +81,9 @@ def cobertura(con: sqlite3.Connection) -> dict[str, int]:
     ids = consultas.utilizaveis(con)
 
     def um(col: str) -> int:
-        return sum(
-            con.execute(
-                f"SELECT count(*) FROM faixas WHERE {col} IS NOT NULL AND video_id IN ({','.join('?' * len(lote))})",
-                lote,
-            ).fetchone()[0]
-            for lote in (ids[i : i + 900] for i in range(0, len(ids), 900))
-        )
+        return con.execute(
+            f"SELECT count(*) FROM faixas WHERE {col} IS NOT NULL AND video_id IN {EM_LISTA}", (lista(ids),)
+        ).fetchone()[0]
 
     return {
         "biblioteca": len(ids),

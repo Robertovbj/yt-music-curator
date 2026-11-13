@@ -35,6 +35,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from curator.banco import consultas
+from curator.banco.consultas import EM_LISTA, lista
 from curator.motor import recomendacoes as rc
 from curator.motor.escrita import Escrita
 from curator.motor.receita import Alvo
@@ -131,19 +132,17 @@ def agregar(coletas: list[dict], pesos: dict[str, float]) -> dict[str, Agregado]
 
 def _meta(con: sqlite3.Connection, ids: list[str]) -> dict[str, dict]:
     out = {}
-    for i in range(0, len(ids), 900):
-        lote = ids[i : i + 900]
-        for r in con.execute(
-            f"SELECT video_id, artistas, duracao_s, avaliacao, curtida FROM faixas WHERE video_id IN ({','.join('?' * len(lote))})",
-            lote,
-        ):
-            arts = json.loads(r["artistas"])
-            out[r["video_id"]] = {
-                "artistas": [normalizar(a["nome"]) for a in arts],
-                "principal": arts[0]["id"] if arts else f"sem-artista:{r['video_id']}",
-                "duracao_s": r["duracao_s"],
-                "avaliacao": r["avaliacao"],
-            }
+    for r in con.execute(
+        f"SELECT video_id, artistas, duracao_s, avaliacao, curtida FROM faixas WHERE video_id IN {EM_LISTA}",
+        (lista(ids),),
+    ):
+        arts = json.loads(r["artistas"])
+        out[r["video_id"]] = {
+            "artistas": [normalizar(a["nome"]) for a in arts],
+            "principal": arts[0]["id"] if arts else f"sem-artista:{r['video_id']}",
+            "duracao_s": r["duracao_s"],
+            "avaliacao": r["avaliacao"],
+        }
     return out
 
 
@@ -168,15 +167,13 @@ def fatores_dislike(con: sqlite3.Connection, ids: list[str], cfg: dict) -> dict[
         )
     }
     out: dict[str, float] = {}
-    for i in range(0, len(ids), 900):
-        lote = ids[i : i + 900]
-        for vid, art in con.execute(
-            f"SELECT video_id, artista_id FROM faixa_artistas WHERE video_id IN ({','.join('?' * len(lote))})",
-            lote,
-        ):
-            if art in avaliadas:
-                d, c = avaliadas[art]
-                out[vid] = min(out.get(vid, 1.0), 1 - r["dislike_peso_artista"] * d / (d + c))
+    for vid, art in con.execute(
+        f"SELECT video_id, artista_id FROM faixa_artistas WHERE video_id IN {EM_LISTA}",
+        (lista(ids),),
+    ):
+        if art in avaliadas:
+            d, c = avaliadas[art]
+            out[vid] = min(out.get(vid, 1.0), 1 - r["dislike_peso_artista"] * d / (d + c))
     import numpy as np
 
     from curator.motor import espacos
@@ -307,12 +304,10 @@ def _fatores_popularidade(con: sqlite3.Connection, ids: list[str], alvo: Alvo | 
 
 def _publicadas(con: sqlite3.Connection, ids: list[str]) -> dict[str, str]:
     out = {}
-    for i in range(0, len(ids), 900):
-        lote = ids[i : i + 900]
-        out |= dict(con.execute(
-            f"SELECT video_id, publicada_em FROM faixas WHERE publicada_em IS NOT NULL "
-            f"AND video_id IN ({','.join('?' * len(lote))})", lote,
-        ).fetchall())  # fmt: skip
+    out |= dict(con.execute(
+        f"SELECT video_id, publicada_em FROM faixas WHERE publicada_em IS NOT NULL "
+        f"AND video_id IN {EM_LISTA}", (lista(ids),),
+    ).fetchall())  # fmt: skip
     return out
 
 

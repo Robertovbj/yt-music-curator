@@ -9,6 +9,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
+from curator.banco import consultas
 from curator.banco.conexao import agora
 
 Tipo = Literal["criar", "adicionar", "remover", "renomear"]
@@ -136,8 +137,8 @@ def criar(
     snapshots = {
         pid: h
         for pid, h in con.execute(
-            f"SELECT playlist_id, snapshot_hash FROM playlists WHERE playlist_id IN ({','.join('?' * len(afetadas))})",
-            afetadas,
+            f"SELECT playlist_id, snapshot_hash FROM playlists WHERE playlist_id IN {consultas.EM_LISTA}",
+            (consultas.lista(afetadas),),
         )
     } if afetadas else {}  # fmt: skip
     cur = con.execute(
@@ -188,15 +189,7 @@ def descartar(con: sqlite3.Connection, plano_id: int) -> bool:
 def diff_legivel(con: sqlite3.Connection, ops: list[Operacao]) -> str:
     """Agrupado por playlist: o que entra (+) e o que sai (−), com título e artista de cada faixa."""
     ids = sorted({v for o in ops for v in o.video_ids})
-    nomes = {}
-    if ids:
-        for r in con.execute(
-            f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})",
-            ids,
-        ):
-            nomes[r["video_id"]] = (
-                f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])}"
-            )
+    nomes = consultas.nomes_das_faixas(con, ids)
     titulos = dict(con.execute("SELECT playlist_id, titulo FROM playlists"))
     por_playlist = defaultdict(list)
     for o in ops:

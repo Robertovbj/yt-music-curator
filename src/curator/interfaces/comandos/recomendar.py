@@ -15,6 +15,7 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
+from curator.banco import consultas
 from curator.config import carregar_config
 from curator.interfaces.cli import app
 from curator.interfaces.comandos.motor import _confirmar, _playlist
@@ -328,12 +329,7 @@ def curtidas(
 
 
 def _rotulos(con, ids: list[str]) -> list[str]:
-    if not ids:
-        return []
-    linhas = {
-        r["video_id"]: f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])}"
-        for r in con.execute(f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})", ids)
-    }  # fmt: skip
+    linhas = consultas.nomes_das_faixas(con, ids)
     return [linhas.get(v, v) for v in ids]
 
 

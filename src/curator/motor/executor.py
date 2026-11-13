@@ -329,36 +329,38 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
         score = np.array([1 / (1 + posicao[v]) for v in ids])
 
     # 4. ordenação total
-    ordem = sorted(range(len(ids)), key=lambda i: (-float(score[i]), ids[i]))
+    ordem = np.array(sorted(range(len(ids)), key=lambda i: (-float(score[i]), ids[i])), dtype=int)
 
     # 5. MMR + limite por artista
     lam = r.diversidade.lambda_
     limite = r.diversidade.max_por_artista
-    por_artista: Counter = Counter()
+    codigo: dict[str, int] = {}
+    artista = np.array([codigo.setdefault(meta[v]["artista_principal"], len(codigo)) for v in ids])
+    por_artista = np.zeros(len(codigo), int)
+    relevancia = np.asarray(score, np.float64)
     escolhidos: list[int] = []
     sim_max = np.full(len(ids), -np.inf)
-    restantes = list(ordem)
-    while restantes and len(escolhidos) < r.tamanho:
-        elegiveis = [
-            i for i in restantes if limite is None or por_artista[meta[ids[i]]["artista_principal"]] < limite
-        ]
-        if not elegiveis:
+    livre = np.ones(len(ids), bool)
+    while len(escolhidos) < r.tamanho:
+        elegivel = livre if limite is None else livre & (por_artista[artista] < limite)
+        if not elegivel.any():
             break
         if lam >= 1 or not escolhidos or E is None:
-            pegar = elegiveis[0]
+            valor = elegivel
         else:
-            # elegiveis está em ordem de relevância; max() fica com o primeiro em empate
-            pegar = max(elegiveis, key=lambda i: lam * float(score[i]) - (1 - lam) * float(sim_max[i]))
+            valor = np.where(elegivel, lam * relevancia - (1 - lam) * sim_max, -np.inf)
+        # na ordem de relevância, o argmax fica com o primeiro em empate (e, sem MMR, com o primeiro elegível)
+        pegar = int(ordem[np.argmax(valor[ordem])])
         escolhidos.append(pegar)
-        restantes.remove(pegar)
-        por_artista[meta[ids[pegar]]["artista_principal"]] += 1
+        livre[pegar] = False
+        por_artista[artista[pegar]] += 1
         if E is not None:
             sim_max = np.maximum(sim_max, (E @ E[pegar] + 1) / 2)
 
     if (
-        restantes and len(escolhidos) < r.tamanho
-    ):  # sobrou espaço: o que ficou de fora foi pelo limite por artista
-        ex.descartes["limite por artista"] = len(restantes)
+        livre.any() and len(escolhidos) < r.tamanho
+    ):  # sobrou espaço: o que ficou de fora foi o limite por artista
+        ex.descartes["limite por artista"] = int(livre.sum())
     ex.itens = [
         Item(ids[i], round(float(score[i]), 6), {k: round(float(v[i]), 6) for k, v in comps.items()})
         for i in escolhidos
