@@ -86,6 +86,15 @@ listar_marcacoes; buscar_faixas mostra as de cada faixa. Quando ele disser que u
 resposta dele: nunca marque pelo que você acha. Artista que faz de tudo (HoYo-MiX) não recebe etiqueta: só a faixa.
 As regras de destino (etiqueta → master) ficam no config.toml dele; classificar_nao_alocadas(nas_gerais=True) e
 criar_plano_das_marcacoes as aplicam.
+ESCRITA (#111): cada faixa tem a escrita do título, do álbum e dos artistas (japonesa, coreana, chinesa, cirilica,
+latina), herdada do artista quando a faixa não tem escrita própria ("MONSTER" da Reol é japonesa). O som não diz o
+idioma: um cluster que soa como J-pop junta pop ocidental, eletrônica de jogo e nightcore. Por isso, quando o pedido
+for de J-pop, J-rock, anime ou K-pop, use a escrita: filtros.exigir_escritas ["japonesa"] (ou ["coreana"]) na
+receita, ou escritas_preferidas como fator quando o pedido for mais solto; nas recomendações, exigir_escritas. Junte
+com o gênero (J-rock = escrita japonesa + Rock) e com as marcações do usuário, que valem mais que a escrita. É um
+sinal, não um rótulo: artista japonês que só usa títulos em inglês fica "latina". buscar_faixas mostra a escrita de
+cada faixa; descrever_vocabulario("escritas") dá a distribuição. Ao nomear clusters, só cite idioma ou mercado
+(J-pop, K-pop…) se estatisticas.escritas sustentar (maioria das faixas); senão, descreva o som.
 FAIXAS IGNORADAS (#100): se o usuário disser que uma faixa não conta ("é meme", "desconsidere", "não é música"),
 use ignorar_faixa(video_id, motivo) com as palavras dele; desfazer=True volta atrás. NUNCA ignore por conta própria.
 """
@@ -172,14 +181,15 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     dislikes = consultas.com_dislike(con)
     uso = _dados_de_uso(con, achadas)
     from curator.banco.compartilhar import importadas
-    from curator.motor import marcacoes
+    from curator.motor import escrita, marcacoes
 
     de_fora = importadas(con)
     marcas = marcacoes.da_faixa(con, achadas)
+    escritas = escrita.calcular(con, achadas)
     return [
         {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes,
          **({"importada": True} if v in de_fora else {}), **({"marcacoes": sorted(marcas[v])} if v in marcas else {}),
-         **uso[v]}
+         **({"escritas": sorted(escritas[v])} if escritas.get(v) else {}), **uso[v]}
         for v in achadas
     ]  # fmt: skip
 
@@ -228,7 +238,14 @@ def buscar_albuns(texto: str, limite: int = 20) -> list[dict]:
 
 def descrever_vocabulario(
     grupo: Literal[
-        "features", "generos_pai", "estilos", "humores", "instrumentos", "generos_jamendo", "marcacoes"
+        "features",
+        "generos_pai",
+        "estilos",
+        "humores",
+        "instrumentos",
+        "generos_jamendo",
+        "marcacoes",
+        "escritas",
     ] = "features",
     filtro: str = "",
     limite: int = 60,
@@ -241,10 +258,20 @@ def descrever_vocabulario(
       menos confiável) e quantas faixas passam em cada nível (amplo 0,7, normal 0,8, estrito 1,0).
     humores / instrumentos / generos_jamendo: probabilidade média (Jamendo).
     marcacoes: as etiquetas do usuário (#107), com quantas faixas cada uma tem.
+    escritas: a escrita do título/álbum/artistas (#111), com quantas faixas da biblioteca têm cada uma.
     `filtro` restringe por trecho do nome.
     """
     con = banco()
     f = normalizar(filtro)
+    if grupo == "escritas":
+        from curator.motor import escrita
+
+        bib = consultas.biblioteca(con)
+        esc = escrita.calcular(con, bib)
+        props = escrita.proporcoes(esc, bib)
+        itens = [{"nome": e, "faixas": sum(1 for v in bib if e in esc.get(v, ())), "fracao": props.get(e, 0.0)}
+                 for e in escrita.ESCRITAS if not f or f in e]  # fmt: skip
+        return {"grupo": grupo, "itens": itens}
     if grupo == "marcacoes":
         from curator.motor import marcacoes
 
@@ -841,17 +868,22 @@ def recomendar_novas(
     generos_preferidos: dict[str, float] | None = None,
     popularidade: dict[str, float] | None = None,
     publicadas_desde: str | None = None,
+    exigir_escritas: list[str] | None = None,
+    excluir_escritas: list[str] | None = None,
     pedido: str | None = None,
 ) -> dict:
     """Recomenda SÓ músicas novas (fora da biblioteca) parecidas com as sementes: faixas (video_ids de
     buscar_faixas), uma playlist, um cluster ou um artista. `modo` é obrigatório: se o usuário não disse rápido
     ou lento, PERGUNTE antes. perfil_alvo/generos_preferidos (como na receita) só no modo lento.
     `popularidade` {"alvo": 0..1, "peso"}: 1 = as mais vistas, 0 = lado B (percentil das visualizações na
-    biblioteca). `publicadas_desde` "AAAA-MM-DD": só lançamentos a partir da data. Os dois valem nos dois modos."""
+    biblioteca). `publicadas_desde` "AAAA-MM-DD": só lançamentos a partir da data. Os dois valem nos dois modos.
+    `exigir_escritas`/`excluir_escritas` (japonesa, coreana, chinesa, cirilica, latina): escrita do título, álbum e
+    artistas, nos dois modos; para pedidos de J-pop/J-rock use exigir_escritas ["japonesa"], para K-pop ["coreana"]."""
     return _recomendar("novas", modo, pedido, faixas=faixas, playlist=playlist, cluster=cluster, artista=artista,
                        tamanho=tamanho, excluir_artistas=excluir_artistas, perfil_alvo=perfil_alvo,
                        generos_preferidos=generos_preferidos, popularidade=popularidade,
-                       publicadas_desde=publicadas_desde)  # fmt: skip
+                       publicadas_desde=publicadas_desde, exigir_escritas=exigir_escritas,
+                       excluir_escritas=excluir_escritas)  # fmt: skip
 
 
 def recomendar_misturando_curtidas(
@@ -867,15 +899,18 @@ def recomendar_misturando_curtidas(
     generos_preferidos: dict[str, float] | None = None,
     popularidade: dict[str, float] | None = None,
     publicadas_desde: str | None = None,
+    exigir_escritas: list[str] | None = None,
+    excluir_escritas: list[str] | None = None,
     pedido: str | None = None,
 ) -> dict:
     """Mistura músicas novas com as da biblioteca (proporcao_novas = fração de novas). Use SÓ quando o usuário
-    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE. `popularidade` e
-    `publicadas_desde` como em recomendar_novas."""
+    pediu explicitamente para misturar. `modo` é obrigatório: na dúvida, PERGUNTE. `popularidade`,
+    `publicadas_desde` e as escritas como em recomendar_novas."""
     return _recomendar("misturar", modo, pedido, proporcao_novas=proporcao_novas, faixas=faixas, playlist=playlist,
                        cluster=cluster, artista=artista, tamanho=tamanho, excluir_artistas=excluir_artistas,
                        perfil_alvo=perfil_alvo, generos_preferidos=generos_preferidos, popularidade=popularidade,
-                       publicadas_desde=publicadas_desde)  # fmt: skip
+                       publicadas_desde=publicadas_desde, exigir_escritas=exigir_escritas,
+                       excluir_escritas=excluir_escritas)  # fmt: skip
 
 
 def concluir_recomendacao(recomendacao_id: int, parcial: bool = False) -> dict:

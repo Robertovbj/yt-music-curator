@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from curator.motor.escrita import ESCRITAS, Escrita
 from curator.motor.espacos import ESCALARES, TIPOS_PROBABILIDADE
 from curator.motor.popularidade import TIPOS_VIDEO
 from curator.texto import normalizar
@@ -49,6 +50,10 @@ class Filtros(BaseModel):
     # marcações do usuário (#107, motor/marcacoes.py): "k-pop", "vtuber"… pelo artista, com exceções por faixa
     exigir_marcacoes: list[str] = []  # pelo menos uma delas
     excluir_marcacoes: list[str] = []
+    # escrita do título/álbum/artistas (#111, motor/escrita.py): "japonesa", "coreana", "chinesa", "cirilica",
+    # "latina". O sinal para pedidos de J-pop, J-rock ou K-pop, que o áudio não separa
+    exigir_escritas: list[Escrita] = []  # pelo menos uma delas
+    excluir_escritas: list[Escrita] = []
 
 
 class Diversidade(BaseModel):
@@ -63,6 +68,7 @@ class Pesos(BaseModel):
     sementes: Annotated[float, Field(ge=0)] = 1.0
     generos: Annotated[float, Field(ge=0)] = 1.0
     marcacoes: Annotated[float, Field(ge=0)] = 1.0
+    escritas: Annotated[float, Field(ge=0)] = 1.0
 
 
 class Receita(BaseModel):
@@ -75,6 +81,7 @@ class Receita(BaseModel):
     generos_preferidos: dict[str, Annotated[float, Field(gt=0, le=10)]] = {}
     sementes: list[str] = []  # video_ids
     marcacoes_preferidas: dict[str, Annotated[float, Field(gt=0, le=10)]] = {}  # fator (#107), não filtro
+    escritas_preferidas: dict[Escrita, Annotated[float, Field(gt=0, le=10)]] = {}  # fator (#111), não filtro
     diversidade: Diversidade = Diversidade()
     pesos: Pesos = Pesos()
 
@@ -87,8 +94,9 @@ class Receita(BaseModel):
 
     def canonico(self) -> str:
         d = self.model_dump(mode="json", by_alias=True)
-        # os campos das marcações (#107) só entram quando usados: as receitas anteriores mantêm o hash
-        for dono, campo, padrao in _NOVOS_107:
+        # os campos das marcações (#107) e da escrita (#111) só entram quando usados: as receitas anteriores
+        # mantêm o hash
+        for dono, campo, padrao in _NOVOS:
             alvo = d if dono is None else d[dono]
             if alvo.get(campo) == padrao:
                 del alvo[campo]
@@ -98,11 +106,15 @@ class Receita(BaseModel):
         return hashlib.sha256(self.canonico().encode()).hexdigest()[:16]
 
 
-_NOVOS_107 = (
+_NOVOS = (
     ("filtros", "exigir_marcacoes", []),
     ("filtros", "excluir_marcacoes", []),
     ("pesos", "marcacoes", 1.0),
     (None, "marcacoes_preferidas", {}),
+    ("filtros", "exigir_escritas", []),
+    ("filtros", "excluir_escritas", []),
+    ("pesos", "escritas", 1.0),
+    (None, "escritas_preferidas", {}),
 )
 
 
@@ -142,6 +154,7 @@ def vocabulario(con: sqlite3.Connection) -> dict[str, list[str]]:
             )
         ],
         "marcacoes": marcacoes.existentes(con),
+        "escritas": list(ESCRITAS),
         "titulos_playlists": [
             r[0]
             for r in con.execute(

@@ -34,7 +34,7 @@ import numpy as np
 
 from curator.banco import vetores
 from curator.banco.conexao import agora, transacao
-from curator.motor import espacos
+from curator.motor import escrita, espacos
 
 
 @dataclass(frozen=True)
@@ -239,14 +239,26 @@ def descrever(con: sqlite3.Connection, ids: list[str]) -> dict:
     ):
         artistas.update(a["nome"] for a in json.loads(lista)[:1])
     est["artistas"] = [[a, n] for a, n in sorted(artistas.items(), key=lambda x: (-x[1], x[0]))[:5]]
+    # #111: fração das faixas por escrita do título/álbum/artistas, o que o áudio não diz (idioma e mercado)
+    est["escritas"] = escrita.proporcoes(escrita.calcular(con, ids), ids)
     return est
 
 
 def nome_automatico(est: dict) -> str:
     """Nome provisório, determinístico, a partir das estatísticas. A IA (M4) pode substituí-lo."""
     partes = []
-    if est.get("estilos"):
-        (r1, p1), *resto = est["estilos"]
+    # estilo de mercado ("J-pop", "K-pop") só com a escrita das faixas sustentando (#111): o som não diz o idioma.
+    # Estatísticas antigas, sem "escritas", ficam como estavam
+    escritas = est.get("escritas")
+    estilos = [
+        (r, p)
+        for r, p in est.get("estilos") or []
+        if escritas is None
+        or r not in escrita.MERCADOS
+        or escritas.get(escrita.MERCADOS[r], 0) >= escrita.SUSTENTA_MERCADO
+    ]
+    if estilos:
+        (r1, p1), *resto = estilos
         # o segundo estilo só entra se for relevante (≥ metade do primeiro); senão é ruído
         segundo = [_rotulo_curto(r) for r, p in resto[:1] if p >= 0.5 * p1]
         partes.append(" / ".join([_rotulo_curto(r1), *segundo]))

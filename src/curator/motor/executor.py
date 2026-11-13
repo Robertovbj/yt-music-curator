@@ -12,6 +12,8 @@
 v2 (#83): `genero_pai_min` passou a ser a afinidade relativa ao núcleo do gênero (ADR-14), não o maior estilo.
 Marcações (#107): `exigir_marcacoes`, `excluir_marcacoes` e `marcacoes_preferidas` são campos novos, sem mudar o
 sentido dos outros; a versão do banco da execução leva o hash das marcações quando a receita usa alguma.
+Escrita (#111): `exigir_escritas`, `excluir_escritas` e `escritas_preferidas`, no mesmo molde; a versão do banco leva
+a versão do algoritmo e o hash das escritas das candidatas quando a receita usa alguma.
 v3 (#101): nos gêneros de `generos.REGUA_APRENDIDA` (Hip Hop e Pop), `genero_pai_min` usa a régua aprendida com os
 rótulos do usuário (ADR-17), com portão e guarda. Mudar esse conjunto pede um `VERSAO_MOTOR` novo, e a versão do banco
 da execução já leva o hash dos rótulos.
@@ -216,6 +218,20 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     if f.excluir_marcacoes:
         fora_m = set(f.excluir_marcacoes)
         aplicar("marcação excluída", np.array([not (marcas.get(v, set()) & fora_m) for v in cand]))
+    escritas: dict[str, frozenset[str]] = {}
+    usa_escrita = bool(f.exigir_escritas or f.excluir_escritas or r.escritas_preferidas)
+    if usa_escrita:
+        from curator.motor import escrita
+
+        escritas = escrita.calcular(con, cand)
+    if f.exigir_escritas:
+        exigidas_e = set(f.exigir_escritas)
+        aplicar(
+            "sem a escrita exigida", np.array([bool(escritas.get(v, frozenset()) & exigidas_e) for v in cand])
+        )
+    if f.excluir_escritas:
+        fora_e = set(f.excluir_escritas)
+        aplicar("escrita excluída", np.array([not (escritas.get(v, frozenset()) & fora_e) for v in cand]))
     if f.duracao_s:
         lo, hi = f.duracao_s
         aplicar(
@@ -296,6 +312,15 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
             ]
         )
         pesos["marcacoes"] = r.pesos.marcacoes
+    if r.escritas_preferidas:
+        soma_e = sum(r.escritas_preferidas.values())
+        comps["escritas"] = np.array(
+            [
+                sum(w for e, w in r.escritas_preferidas.items() if e in escritas.get(v, ())) / soma_e
+                for v in ids
+            ]
+        )
+        pesos["escritas"] = r.pesos.escritas
     ativos = [k for k in comps if pesos[k] > 0]
     if ativos:
         score = sum(pesos[k] * comps[k] for k in ativos) / sum(pesos[k] for k in ativos)
@@ -345,4 +370,8 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
 
         dump = "\n".join(f"{v}:{','.join(sorted(m))}" for v, m in sorted(marcas.items()))
         ex.versao_banco = f"{ex.versao_banco}+marcacoes:{hashlib.sha256(dump.encode()).hexdigest()[:12]}"
+    if usa_escrita:
+        from curator.motor import escrita
+
+        ex.versao_banco = f"{ex.versao_banco}+escrita:{escrita.versao(escritas)}"
     return ex
