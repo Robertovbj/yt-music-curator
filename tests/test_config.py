@@ -14,6 +14,13 @@ def test_config_padrao_sem_arquivo():
     assert carregar_config() == PADRAO
 
 
+def test_so_o_maest_vem_ligado_e_os_outros_extras_seguem_validos():
+    from curator.audio import extras
+
+    assert PADRAO["analise"]["extras"] == ["maest"]
+    assert extras.validar(["msd_tags", "yamnet", "maest"]) == ["msd_tags", "yamnet", "maest"]
+
+
 def test_config_do_usuario_mescla_com_padrao():
     c = caminhos()
     c.garantir()
