@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
+from curator.banco import consultas
 from curator.interfaces.cli import app
 from curator.interfaces.comum import aviso, banco, falhar
 from curator.motor import classificar as cl
@@ -20,15 +21,7 @@ app.add_typer(plano_app, name="plano")
 
 
 def _nomes(con, ids: list[str]) -> dict[str, str]:
-    if not ids:
-        return {}
-    return {
-        r["video_id"]: f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])}"
-        for r in con.execute(
-            f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})",
-            ids,
-        )
-    }
+    return consultas.nomes_das_faixas(con, ids)
 
 
 def _playlist(con, ref: str | None) -> str | None:
@@ -332,8 +325,8 @@ def plano_aplicar(
         blocos = [
             hierarquia.bloco_toml(p, mae=mae)
             for p in con.execute(
-                f"SELECT playlist_id, titulo FROM playlists WHERE playlist_id IN ({','.join('?' * len(res.criadas))})",
-                list(res.criadas.values()),
+                f"SELECT playlist_id, titulo FROM playlists WHERE playlist_id IN {consultas.EM_LISTA}",
+                (consultas.lista(res.criadas.values()),),
             )
         ]
         typer.echo("\nacrescente ao hierarquia.toml (as filhas antigas, agora vazias, podem sair dele):\n")

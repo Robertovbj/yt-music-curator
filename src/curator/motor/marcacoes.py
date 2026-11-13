@@ -229,8 +229,8 @@ def plano(con: sqlite3.Connection, rs: list[Regra]) -> int:
     alvos = {p for r in rs for p in (*r.entrar_em, *r.sair_de)}
     membros: dict[str, set[str]] = defaultdict(set)
     for pid, vid in con.execute(
-        f"SELECT playlist_id, video_id FROM playlist_faixas WHERE playlist_id IN ({','.join('?' * len(alvos))})",
-        sorted(alvos),
+        f"SELECT playlist_id, video_id FROM playlist_faixas WHERE playlist_id IN {consultas.EM_LISTA}",
+        (consultas.lista(sorted(alvos)),),
     ):
         membros[pid].add(vid)
     add: dict[str, dict[str, str]] = defaultdict(dict)
