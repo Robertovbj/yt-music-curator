@@ -240,7 +240,9 @@ def de_classificacao(con: sqlite3.Connection, decisoes) -> int:
         for x in d.destinos:
             op = por.setdefault(x.playlist_id, Operacao("adicionar", x.playlist_id))
             op.video_ids.append(d.video_id)
-            op.motivo[d.video_id] = f"score {x.score:.2f} ≥ limiar {x.limiar:.2f}"
+            op.motivo[d.video_id] = (
+                f"marcação {x.regra}" if x.regra else f"score {x.score:.2f} ≥ limiar {x.limiar:.2f}"
+            )
     return criar(con, "classificar", list(por.values()))
 
 

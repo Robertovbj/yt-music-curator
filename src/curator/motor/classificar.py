@@ -10,6 +10,10 @@ entra em toda playlist em que s ≥ τ.
 Só nas playlists que o usuário nomeia (#80): `em` (playlists), `mae` (as filhas dela) ou `nas_gerais` (as
 criadas por `curator playlists sugerir`). Sem alvo, nada é sugerido: as playlists existentes não são mexidas sem
 pedido.
+
+Regras das marcações (#107, `motor/marcacoes.py`): quando vêm em `regras`, valem DEPOIS do áudio, só nas playlists
+pedidas. A etiqueta da faixa acrescenta destinos (`entrar_em`, com `Destino.regra`) e barra outros (`sair_de`, em
+`Decisao.barradas`). O score e os limiares não mudam.
 """
 
 import sqlite3
@@ -46,6 +50,7 @@ class Destino:
     titulo: str
     score: float
     limiar: float
+    regra: str | None = None  # entrou pela marcação (#107), não pelo score
 
 
 @dataclass
@@ -54,6 +59,8 @@ class Decisao:
     destinos: list[Destino]
     proximas: list[Destino]  # quando não há destino: as 3 mais próximas, para sugerir playlist nova
     ambigua: bool  # algum score a menos de MARGEM_AMBIGUA do limiar: caso para a IA explicar
+    # destinos do áudio que uma marcação tirou (#107): (destino, etiqueta)
+    barradas: list[tuple[Destino, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -194,9 +201,10 @@ def alvos(con: sqlite3.Connection, mae: str | None = None, em: list[str] | None 
 
 def classificar(con: sqlite3.Connection, ids: list[str] | None = None, mae: str | None = None,
                 k: int = K, alfa: float = ALFA, percentil: float = PERCENTIL, em: list[str] | None = None,
-                nas_gerais: bool = False) -> Classificacao:  # fmt: skip
+                nas_gerais: bool = False, regras: list | None = None) -> Classificacao:  # fmt: skip
     """Entre os `alvos` pedidos. Por padrão, as curtidas não alocadas; só com `nas_gerais`, as curtidas que ainda
-    não estão em nenhuma geral (as outras playlists não contam). Faixas sem análise ficam de fora (e são contadas)."""
+    não estão em nenhuma geral (as outras playlists não contam). Faixas sem análise ficam de fora (e são contadas).
+    `regras` (#107): as das marcações, aplicadas depois do áudio (ver `aplicar_regras`)."""
     raizes = alvos(con, mae, em, nas_gerais)
     if ids is None:
         ids = (
@@ -208,10 +216,44 @@ def classificar(con: sqlite3.Connection, ids: list[str] | None = None, mae: str 
     com = [v for v in ids if v in emb.indice]
     ps, frias = perfis(con, k, alfa, percentil)
     decisoes = [decidir(emb.linha(v), v, ps, raizes, k, alfa) for v in com]
+    if regras:
+        decisoes = aplicar_regras(con, decisoes, regras, raizes, ps, emb, k, alfa)
     titulos = {r[0] for r in con.execute(
         f"SELECT titulo FROM playlists WHERE playlist_id IN ({','.join('?' * len(raizes))})", raizes
     )}  # fmt: skip
     return Classificacao(decisoes, [f for f in frias if f[0] in titulos], len(ids) - len(com))
+
+
+def aplicar_regras(con: sqlite3.Connection, decisoes: list[Decisao], regras: list, raizes: list[str],
+                   ps: dict[str, Perfil], emb, k: int = K, alfa: float = ALFA) -> list[Decisao]:  # fmt: skip
+    """As regras das marcações (#107) sobre as decisões do áudio, só entre as playlists pedidas (`raizes`):
+    `entrar_em` acrescenta o destino (com o score, para informação), `sair_de` tira. Entrar vence sair."""
+    from curator.motor import marcacoes
+
+    pedidas = set(raizes)
+    etiquetas = marcacoes.da_faixa(con, [d.video_id for d in decisoes])
+    titulos = dict(con.execute("SELECT playlist_id, titulo FROM playlists"))
+    for d in decisoes:
+        entrar, sair = marcacoes.destinos_por_regra(etiquetas.get(d.video_id, set()), regras)
+        fica = []
+        for x in d.destinos:
+            if x.playlist_id in sair and x.playlist_id in pedidas:
+                d.barradas.append((x, sair[x.playlist_id]))
+            else:
+                fica.append(x)
+        ja = {x.playlist_id for x in fica}
+        for pid, e in entrar.items():
+            if pid in pedidas and pid not in ja:
+                p = ps.get(pid)
+                s = _score(emb.linha(d.video_id), p.E, p.centroide, k, alfa) if p else float("nan")
+                fica.append(Destino(pid, titulos.get(pid, pid), round(s, 4),
+                                    round(p.limiar, 4) if p else float("nan"), regra=e))  # fmt: skip
+        d.destinos = sorted(
+            fica, key=lambda x: (x.regra is not None, -x.score if x.score == x.score else 0, x.playlist_id)
+        )
+        if d.destinos:
+            d.proximas = []
+    return decisoes
 
 
 # ------------------------------------------------------------------ avaliação (#28)

@@ -157,22 +157,32 @@ def classificar(
     nas_gerais: bool = typer.Option(
         False, "--nas-gerais", help="Nas playlists gerais (as de `curator playlists sugerir`)."
     ),
+    sem_regras: bool = typer.Option(
+        False, "--sem-regras", help="Com --nas-gerais, ignora as regras das marcações (só o áudio)."
+    ),
     plano: bool = typer.Option(False, "--plano", help="Gera um plano com as sugestões."),
     como_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Sugere em quais das playlists PEDIDAS colocar as curtidas (kNN + centroide, limiar por playlist).
 
-    Com --em/--mae, as curtidas não alocadas; com --nas-gerais, as que ainda não estão em nenhuma geral."""
+    Com --em/--mae, as curtidas não alocadas; com --nas-gerais, as que ainda não estão em nenhuma geral, e as regras
+    das marcações do config.toml (#107) valem depois do áudio."""
+    from curator.config import carregar_config
+    from curator.motor import marcacoes as mc
+
     con = banco()
     try:
+        regras = mc.regras(con, carregar_config()) if nas_gerais and not sem_regras else None
         c = cl.classificar(
-            con, mae=_playlist(con, mae), em=[_playlist(con, x) for x in em or []], nas_gerais=nas_gerais
-        )
-    except cl.SemAlvo as e:
+            con, mae=_playlist(con, mae), em=[_playlist(con, x) for x in em or []], nas_gerais=nas_gerais,
+            regras=regras,
+        )  # fmt: skip
+    except (cl.SemAlvo, mc.MarcacaoInvalida) as e:
         falhar(str(e))
     if como_json:
         typer.echo(json.dumps([{"video_id": d.video_id, "destinos": [vars(x) for x in d.destinos],
-                                 "proximas": [vars(x) for x in d.proximas], "ambigua": d.ambigua} for d in c.decisoes],
+                                 "proximas": [vars(x) for x in d.proximas], "ambigua": d.ambigua,
+                                 "barradas": [{**vars(x), "etiqueta": e} for x, e in d.barradas]} for d in c.decisoes],
                               ensure_ascii=False, indent=2))  # fmt: skip
     else:
         nomes = _nomes(con, [d.video_id for d in c.decisoes])
@@ -180,11 +190,20 @@ def classificar(
         typer.echo(f"{len(com)} de {len(c.decisoes)} com destino · {c.sem_analise} sem análise (fora)")
         for d in c.decisoes:
             if d.destinos:
-                alvo = ", ".join(f"{x.titulo} ({x.score:.2f}≥{x.limiar:.2f})" for x in d.destinos)
+                alvo = ", ".join(
+                    f"{x.titulo} (marcação {x.regra})"
+                    if x.regra
+                    else f"{x.titulo} ({x.score:.2f}≥{x.limiar:.2f})"
+                    for x in d.destinos
+                )
+            elif not d.proximas:
+                alvo = "sem destino"
             else:
                 alvo = "sem destino · mais próximas: " + ", ".join(
                     f"{x.titulo} ({x.score:.2f}<{x.limiar:.2f})" for x in d.proximas
                 )
+            if d.barradas:
+                alvo += " · barrada pela marcação: " + ", ".join(f"{x.titulo} ({e})" for x, e in d.barradas)
             typer.echo(f"  {'?' if d.ambigua else ' '} {nomes.get(d.video_id, d.video_id)} → {alvo}")
     for titulo, n in c.frias:
         aviso(f"'{titulo}' tem só {n} membro(s) analisado(s); ficou de fora (mínimo {cl.MIN_MEMBROS})")

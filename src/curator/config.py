@@ -92,6 +92,12 @@ PADRAO: dict = {
     "pasta_local": {
         "caminho": "",
     },
+    "marcacoes": {  # #107, motor/marcacoes.py
+        # regras de destino, opcionais e pessoais: [[marcacoes.regras]] etiqueta = "k-pop",
+        # entrar_em = ["K-pop"], sair_de = ["J-pop & VTubers"] (masters, por título ou id). Sem regra, as marcações
+        # só informam (filtro e fator nas receitas). Entrar vence sair.
+        "regras": [],
+    },
     "proxy": [],  # [[proxy]] nome = "...", url = "socks5://..."; opcionais: cota_diaria, intervalo_min_s/max_s
 }
 

@@ -10,6 +10,8 @@
 
 `VERSAO_MOTOR` muda quando o significado de um campo da receita muda; a execução guarda a versão (ADR-05).
 v2 (#83): `genero_pai_min` passou a ser a afinidade relativa ao núcleo do gênero (ADR-14), não o maior estilo.
+Marcações (#107): `exigir_marcacoes`, `excluir_marcacoes` e `marcacoes_preferidas` são campos novos, sem mudar o
+sentido dos outros; a versão do banco da execução leva o hash das marcações quando a receita usa alguma.
 v3 (#101): nos gêneros de `generos.REGUA_APRENDIDA` (Hip Hop e Pop), `genero_pai_min` usa a régua aprendida com os
 rótulos do usuário (ADR-17), com portão e guarda. Mudar esse conjunto pede um `VERSAO_MOTOR` novo, e a versão do banco
 da execução já leva o hash dos rótulos.
@@ -203,6 +205,17 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     if f.somente_playlists:
         dentro = {resolver_playlist(con, p) for p in f.somente_playlists}
         aplicar("fora das playlists exigidas", np.array([bool(meta[v]["playlists"] & dentro) for v in cand]))
+    marcas: dict[str, set[str]] = {}
+    if f.exigir_marcacoes or f.excluir_marcacoes or r.marcacoes_preferidas:
+        from curator.motor import marcacoes
+
+        marcas = marcacoes.da_faixa(con, cand)
+    if f.exigir_marcacoes:
+        exigidas = set(f.exigir_marcacoes)
+        aplicar("sem a marcação exigida", np.array([bool(marcas.get(v, set()) & exigidas) for v in cand]))
+    if f.excluir_marcacoes:
+        fora_m = set(f.excluir_marcacoes)
+        aplicar("marcação excluída", np.array([not (marcas.get(v, set()) & fora_m) for v in cand]))
     if f.duracao_s:
         lo, hi = f.duracao_s
         aplicar(
@@ -274,6 +287,15 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
             acc += w * p / (p.max() or 1)
             soma_w += w
         comps["generos"], pesos["generos"] = acc / soma_w, r.pesos.generos
+    if r.marcacoes_preferidas:
+        soma_m = sum(r.marcacoes_preferidas.values())
+        comps["marcacoes"] = np.array(
+            [
+                sum(w for m, w in r.marcacoes_preferidas.items() if m in marcas.get(v, ())) / soma_m
+                for v in ids
+            ]
+        )
+        pesos["marcacoes"] = r.pesos.marcacoes
     ativos = [k for k in comps if pesos[k] > 0]
     if ativos:
         score = sum(pesos[k] * comps[k] for k in ativos) / sum(pesos[k] for k in ativos)
@@ -318,4 +340,9 @@ def executar(con: sqlite3.Connection, r: Receita, universo: list[str] | None = N
     ]
     if probs.versao_rotulos:
         ex.versao_banco = f"{ex.versao_banco}+rotulos:{probs.versao_rotulos}"
+    if marcas or f.exigir_marcacoes or f.excluir_marcacoes or r.marcacoes_preferidas:
+        import hashlib
+
+        dump = "\n".join(f"{v}:{','.join(sorted(m))}" for v, m in sorted(marcas.items()))
+        ex.versao_banco = f"{ex.versao_banco}+marcacoes:{hashlib.sha256(dump.encode()).hexdigest()[:12]}"
     return ex

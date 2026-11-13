@@ -77,6 +77,15 @@ POPULARIDADE (visualizações de todo o YouTube, não as do usuário): `populari
 recomendações, use o campo `popularidade` {"alvo"} e `publicadas_desde` (lançamentos). "Só a versão de estúdio",
 "sem clipe", "sem cover" → filtros.tipos_video ["faixa"]. Veja a cobertura em descrever_vocabulario("features"):
 sem dados, ofereça `curator sincronizar` em vez de usar.
+MARCAÇÕES (#107): etiquetas que o USUÁRIO dá a artistas ("k-pop", "vtuber", "pop-ocidental"…), com exceção por
+faixa. O áudio não separa pop ocidental de J-pop nem K-pop de pop; a marcação separa. São dados para você usar
+conforme o pedido: filtros.exigir_marcacoes / excluir_marcacoes e marcacoes_preferidas (fator) na receita. Ex.:
+"J-pop sem K-pop" → excluir_marcacoes ["k-pop"]. Veja as que existem em descrever_vocabulario("marcacoes") ou
+listar_marcacoes; buscar_faixas mostra as de cada faixa. Quando ele disser que um artista É de uma categoria
+("a Moona é VTuber"), grave com marcar_artista; uma faixa só ("essa do HoYo-MiX é K-pop"), com marcar_faixa. SÓ a
+resposta dele: nunca marque pelo que você acha. Artista que faz de tudo (HoYo-MiX) não recebe etiqueta: só a faixa.
+As regras de destino (etiqueta → master) ficam no config.toml dele; classificar_nao_alocadas(nas_gerais=True) e
+criar_plano_das_marcacoes as aplicam.
 FAIXAS IGNORADAS (#100): se o usuário disser que uma faixa não conta ("é meme", "desconsidere", "não é música"),
 use ignorar_faixa(video_id, motivo) com as palavras dele; desfazer=True volta atrás. NUNCA ignore por conta própria.
 """
@@ -163,11 +172,14 @@ def buscar_faixas(texto: str, limite: int = 20) -> list[dict]:
     dislikes = consultas.com_dislike(con)
     uso = _dados_de_uso(con, achadas)
     from curator.banco.compartilhar import importadas
+    from curator.motor import marcacoes
 
     de_fora = importadas(con)
+    marcas = marcacoes.da_faixa(con, achadas)
     return [
         {**meta[v], "analisada": v in analisadas, "na_biblioteca": v in biblioteca, "dislike": v in dislikes,
-         **({"importada": True} if v in de_fora else {}), **uso[v]}
+         **({"importada": True} if v in de_fora else {}), **({"marcacoes": sorted(marcas[v])} if v in marcas else {}),
+         **uso[v]}
         for v in achadas
     ]  # fmt: skip
 
@@ -216,7 +228,7 @@ def buscar_albuns(texto: str, limite: int = 20) -> list[dict]:
 
 def descrever_vocabulario(
     grupo: Literal[
-        "features", "generos_pai", "estilos", "humores", "instrumentos", "generos_jamendo"
+        "features", "generos_pai", "estilos", "humores", "instrumentos", "generos_jamendo", "marcacoes"
     ] = "features",
     filtro: str = "",
     limite: int = 60,
@@ -228,10 +240,17 @@ def descrever_vocabulario(
       a régua do genero_pai_min: `regua` (nucleo, nucleo_amplo ou global — global = poucas faixas desse gênero, limite
       menos confiável) e quantas faixas passam em cada nível (amplo 0,7, normal 0,8, estrito 1,0).
     humores / instrumentos / generos_jamendo: probabilidade média (Jamendo).
+    marcacoes: as etiquetas do usuário (#107), com quantas faixas cada uma tem.
     `filtro` restringe por trecho do nome.
     """
     con = banco()
     f = normalizar(filtro)
+    if grupo == "marcacoes":
+        from curator.motor import marcacoes
+
+        itens = [{"nome": r["etiqueta"], "faixas": r["faixas"], "artistas": len(r["artistas"])}
+                 for r in marcacoes.resumo(con) if not f or f in normalizar(r["etiqueta"])]  # fmt: skip
+        return {"grupo": grupo, "itens": itens[:limite]}
     if grupo == "features":
         esc = espacos.escalares(con)
         out = []
@@ -403,6 +422,77 @@ def rotular_genero(video_id: str, pai: str, pertence: bool | None) -> dict:
     return {"ok": True, "video_id": video_id, "pai": pai, "pertence": pertence}
 
 
+# ------------------------------------------------------------------ marcações (#107)
+
+
+def _regras(con) -> list:
+    """As regras de destino do config.toml; levanta ValueError (MarcacaoInvalida) se estiverem erradas."""
+    from curator.config import carregar_config
+    from curator.motor import marcacoes
+
+    return marcacoes.regras(con, carregar_config())
+
+
+def listar_marcacoes(etiqueta: str | None = None) -> dict:
+    """As marcações do usuário: por etiqueta, os artistas marcados, as exceções por faixa e quantas faixas ficam com
+    ela; e as regras de destino do config.toml (etiqueta → masters em que entra e de que sai)."""
+    from curator.motor import marcacoes
+
+    con = banco()
+    try:
+        linhas = marcacoes.resumo(con, etiqueta)
+        rs = _regras(con)
+    except ValueError as e:
+        return {"erros": [str(e)]}
+    titulos = dict(con.execute("SELECT playlist_id, titulo FROM playlists"))
+    return {
+        "marcacoes": linhas,
+        "regras": [{"etiqueta": r.etiqueta, "entrar_em": [titulos.get(p, p) for p in r.entrar_em],
+                    "sair_de": [titulos.get(p, p) for p in r.sair_de]} for r in rs],
+    }  # fmt: skip
+
+
+def marcar_artista(artista: str, etiqueta: str, desfazer: bool = False) -> dict:
+    """SÓ com o que o USUÁRIO disse ("a Moona é VTuber"): dá a etiqueta a todas as faixas do artista (nome exato de
+    buscar_artistas, todos os canais com esse nome). `desfazer=True` tira. Nunca marque pelo que você acha, e não
+    marque artista que faz de tudo (HoYo-MiX): aí é marcar_faixa."""
+    from curator.motor import marcacoes
+
+    con = banco()
+    try:
+        achados = marcacoes.marcar_artista(con, artista, etiqueta, "mcp", desfazer)
+    except ValueError as e:
+        return {"erros": [str(e)]}
+    return {"ok": True, "etiqueta": marcacoes.etiqueta(etiqueta), "artista": achados[0][1], "canais": len(achados),
+            "desfeita": desfazer}  # fmt: skip
+
+
+def marcar_faixa(video_id: str, etiqueta: str, tem: bool | None) -> dict:
+    """SÓ com o que o USUÁRIO disse: exceção da faixa, que vence o artista. tem=True dá a etiqueta, False tira
+    (mesmo que o artista tenha), None apaga a exceção."""
+    from curator.motor import marcacoes
+
+    con = banco()
+    try:
+        marcacoes.marcar_faixa(con, video_id, etiqueta, tem, "mcp")
+    except ValueError as e:
+        return {"erros": [str(e)]}
+    return {"ok": True, "video_id": video_id, "etiqueta": marcacoes.etiqueta(etiqueta), "tem": tem,
+            "etiquetas_da_faixa": sorted(marcacoes.da_faixa(con, [video_id]).get(video_id, set()))}  # fmt: skip
+
+
+def criar_plano_das_marcacoes() -> dict:
+    """Plano (não aplicado) que corrige as masters atuais pelas regras de destino do config.toml: só o que as
+    contraria. Só se o usuário pedir."""
+    from curator.motor import marcacoes
+
+    con = banco()
+    try:
+        return mostrar_plano(marcacoes.plano(con, _regras(con)))
+    except ValueError as e:
+        return {"erros": [str(e)]}
+
+
 def ignorar_faixa(video_id: str, motivo: str | None = None, desfazer: bool = False) -> dict:
     """SÓ quando o USUÁRIO pedir para desconsiderar uma faixa (meme, cover de piada, não é música): ela sai de tudo
     (biblioteca, receitas, classificação, clusters, mapa, recomendações, buscas, rótulos de gênero), mas continua
@@ -478,11 +568,13 @@ def classificar_nao_alocadas(
     """Em quais das playlists NOMEADAS pelo usuário colocar curtidas (kNN + centroide, limiar por playlist).
 
     Exige um alvo: `playlists` (ids ou títulos), `mae` (as filhas dela) ou `nas_gerais` (as playlists gerais).
-    Com playlists/mae, as curtidas não alocadas; com nas_gerais, as curtidas que ainda não estão em nenhuma geral."""
+    Com playlists/mae, as curtidas não alocadas; com nas_gerais, as curtidas que ainda não estão em nenhuma geral,
+    e as regras das marcações do config.toml valem depois do áudio (destino com `regra`; `barradas` = tiradas)."""
     con = banco()
     try:
         c = cl.classificar(con, mae=_escopo(con, mae) if mae else None,
-                           em=[_escopo(con, x) for x in playlists or []], nas_gerais=nas_gerais)  # fmt: skip
+                           em=[_escopo(con, x) for x in playlists or []], nas_gerais=nas_gerais,
+                           regras=_regras(con) if nas_gerais else None)  # fmt: skip
     except (cl.SemAlvo, ValueError) as e:
         return {"erros": [str(e)]}
     meta = _faixas(con, [d.video_id for d in c.decisoes[:limite]])
@@ -497,6 +589,7 @@ def classificar_nao_alocadas(
                 "destinos": [vars(x) for x in d.destinos],
                 "mais_proximas": [vars(x) for x in d.proximas],
                 "ambigua": d.ambigua,
+                **({"barradas": [{**vars(x), "etiqueta": e} for x, e in d.barradas]} if d.barradas else {}),
             }  # fmt: skip
             for d in c.decisoes[:limite]
         ],
@@ -620,7 +713,8 @@ def criar_plano_da_classificacao(
     con = banco()
     try:
         c = cl.classificar(con, mae=_escopo(con, mae) if mae else None,
-                           em=[_escopo(con, x) for x in playlists or []], nas_gerais=nas_gerais)  # fmt: skip
+                           em=[_escopo(con, x) for x in playlists or []], nas_gerais=nas_gerais,
+                           regras=_regras(con) if nas_gerais else None)  # fmt: skip
         return mostrar_plano(planos.de_classificacao(con, c.decisoes))
     except (cl.SemAlvo, ValueError) as e:
         return {"erros": [str(e)]}
@@ -843,7 +937,8 @@ def faltantes_nas_agregadoras() -> dict:
 
 FERRAMENTAS = [
     arvore_playlists, estatisticas, buscar_faixas, buscar_artistas, buscar_albuns, descrever_vocabulario, examinar_genero,
-    faixas_para_rotular, rotular_genero, ignorar_faixa,
+    faixas_para_rotular, rotular_genero, ignorar_faixa, listar_marcacoes, marcar_artista, marcar_faixa,
+    criar_plano_das_marcacoes,
     exemplos_de_receitas, obter_receita_por_pedido, executar_receita, salvar_receita, classificar_nao_alocadas,
     sugerir_playlists_gerais, criar_plano_das_gerais, sugerir_reorganizacao, renomear_cluster, criar_plano_da_receita, criar_plano_da_classificacao,
     criar_plano_da_reorganizacao, mostrar_plano, faltantes_nas_agregadoras, exemplos_de_recomendacoes,
