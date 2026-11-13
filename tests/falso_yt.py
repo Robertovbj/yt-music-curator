@@ -44,6 +44,7 @@ class FalsoYT:
         self.avaliacoes: dict[
             str, str
         ] = {}  # video_id → likeStatus real (botão do player); padrão INDIFFERENT
+        self.falhar_next = False  # o "next" do player falha (faixa indisponível, erro de rede)
         self._seq = 0
         self.chamadas = Counter()
 
@@ -93,6 +94,8 @@ class FalsoYT:
         """Só o "next" cru: o botão de like do player mostra o dislike que o rádio esconde."""
         assert endpoint == "next", endpoint
         self.chamadas["next"] += 1
+        if self.falhar_next:
+            raise RuntimeError("next indisponível")
         vid = body["videoId"]
         botao = {
             "likeButtonRenderer": {
