@@ -46,6 +46,9 @@ class Filtros(BaseModel):
     generos_min: dict[str, Unidade] = {}  # passa se QUALQUER rótulo listado tiver prob ≥ valor
     # afinidade RELATIVA ao núcleo do gênero (#83, ADR-14): 1,0 = típica; 0,7 amplo, 0,8 normal, 1,0 estrito
     genero_pai_min: dict[str, Annotated[float, Field(ge=0, le=3)]] = {}
+    # marcações do usuário (#107, motor/marcacoes.py): "k-pop", "vtuber"… pelo artista, com exceções por faixa
+    exigir_marcacoes: list[str] = []  # pelo menos uma delas
+    excluir_marcacoes: list[str] = []
 
 
 class Diversidade(BaseModel):
@@ -59,6 +62,7 @@ class Pesos(BaseModel):
     perfil: Annotated[float, Field(ge=0)] = 1.0
     sementes: Annotated[float, Field(ge=0)] = 1.0
     generos: Annotated[float, Field(ge=0)] = 1.0
+    marcacoes: Annotated[float, Field(ge=0)] = 1.0
 
 
 class Receita(BaseModel):
@@ -70,6 +74,7 @@ class Receita(BaseModel):
     perfil_alvo: dict[str, Alvo] = {}
     generos_preferidos: dict[str, Annotated[float, Field(gt=0, le=10)]] = {}
     sementes: list[str] = []  # video_ids
+    marcacoes_preferidas: dict[str, Annotated[float, Field(gt=0, le=10)]] = {}  # fator (#107), não filtro
     diversidade: Diversidade = Diversidade()
     pesos: Pesos = Pesos()
 
@@ -81,10 +86,24 @@ class Receita(BaseModel):
         return self
 
     def canonico(self) -> str:
-        return json.dumps(self.model_dump(mode="json", by_alias=True), sort_keys=True, ensure_ascii=False)
+        d = self.model_dump(mode="json", by_alias=True)
+        # os campos das marcações (#107) só entram quando usados: as receitas anteriores mantêm o hash
+        for dono, campo, padrao in _NOVOS_107:
+            alvo = d if dono is None else d[dono]
+            if alvo.get(campo) == padrao:
+                del alvo[campo]
+        return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
     def hash(self) -> str:
         return hashlib.sha256(self.canonico().encode()).hexdigest()[:16]
+
+
+_NOVOS_107 = (
+    ("filtros", "exigir_marcacoes", []),
+    ("filtros", "excluir_marcacoes", []),
+    ("pesos", "marcacoes", 1.0),
+    (None, "marcacoes_preferidas", {}),
+)
 
 
 class ReceitaInvalida(ValueError):
@@ -102,6 +121,8 @@ def _sugerir(nome: str, opcoes: list[str]) -> str:
 
 
 def vocabulario(con: sqlite3.Connection) -> dict[str, list[str]]:
+    from curator.motor import marcacoes
+
     rotulos = [
         r[0]
         for r in con.execute(
@@ -120,6 +141,7 @@ def vocabulario(con: sqlite3.Connection) -> dict[str, list[str]]:
                 "SELECT playlist_id FROM playlists WHERE propria = 1 AND ignorada = 0 ORDER BY playlist_id"
             )
         ],
+        "marcacoes": marcacoes.existentes(con),
         "titulos_playlists": [
             r[0]
             for r in con.execute(
@@ -191,6 +213,14 @@ def validar(con: sqlite3.Connection, r: Receita) -> None:
             erros.append(
                 f"filtros.genero_pai_min: gênero '{pai}' não existe{_sugerir(pai, v['generos_pai'])}"
             )
+    for campo, nomes in (
+        ("filtros.exigir_marcacoes", r.filtros.exigir_marcacoes),
+        ("filtros.excluir_marcacoes", r.filtros.excluir_marcacoes),
+        ("marcacoes_preferidas", list(r.marcacoes_preferidas)),
+    ):
+        for m in nomes:
+            if m not in v["marcacoes"]:
+                erros.append(f"{campo}: marcação '{m}' não existe{_sugerir(m, v['marcacoes'])}")
     if r.sementes:
         existentes = {
             x[0]

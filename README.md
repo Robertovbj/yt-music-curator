@@ -172,6 +172,20 @@ uv run curator generos status --validar                   # rótulos por gênero
 - **Guarda (#101):** o modelo só opina nas faixas parecidas com alguma faixa rotulada. Nas outras, como as trilhas de jogo, vale a régua do Discogs.
 - **Onde aparece:** nas receitas, a régua aprendida vale no Hip Hop e no Pop. Rock e Electronic seguem na régua do Discogs, e o `examinar_genero` mostra as duas lado a lado (ADR-17).
 
+**Marcações por artista (#107).** O som não separa pop ocidental de J-pop, nem K-pop de pop; o artista separa. Você dá etiquetas aos artistas, e uma exceção por faixa vence a do artista:
+
+```sh
+uv run curator marcacoes artista vtuber "Hoshimachi Suisei" "Mori Calliope"   # todos os canais com o nome
+uv run curator marcacoes faixa k-pop -- VIDEO_ID        # só esta faixa (--nao tira, --desfazer volta ao artista)
+uv run curator marcacoes listar --faixas                # etiquetas, artistas, exceções e faixas
+uv run curator marcacoes regras                         # as regras de destino do config.toml
+uv run curator marcacoes plano                          # corrige as masters atuais pelas regras
+```
+
+- **Nas receitas:** `filtros.exigir_marcacoes`, `filtros.excluir_marcacoes` (ex.: J-pop sem K-pop) e `marcacoes_preferidas` como fator do score. Pelo MCP, a IA grava uma marcação só quando você diz o que o artista é (`marcar_artista`, `marcar_faixa`).
+- **Parcerias:** a faixa fica com as etiquetas de todos os artistas dela.
+- **Regras de destino (opcionais):** no `config.toml`, `[[marcacoes.regras]]` com `etiqueta`, `entrar_em` e `sair_de` (masters, por título). Entrar vence sair. Elas valem no `classificar --nas-gerais`, depois do som (`--sem-regras` mostra só o som), e no `marcacoes plano`. Sem regra, as marcações só informam.
+
 Popularidade e tipo do vídeo (#87) vêm do `sincronizar`:
 - **`popularidade`:** o percentil das visualizações de todo o YouTube na sua biblioteca, em escala log, de 0 (lado B) a 1 (as mais vistas). Vale em `perfil_alvo` e em `filtros.min`/`max`, como uma feature.
 - **`filtros.tipos_video`:** `["faixa"]` deixa só as faixas de áudio, sem clipes (`clipe`) nem vídeos de usuário (`usuario`). A faixa sem essa informação fica.

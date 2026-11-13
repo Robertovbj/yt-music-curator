@@ -25,6 +25,7 @@
 - [ADR-15: Análises extras e metadados externos (#88)](#adr-15-análises-extras-e-metadados-externos-88)
 - [ADR-16: Compartilhar análises entre pessoas (#96)](#adr-16-compartilhar-análises-entre-pessoas-96)
 - [ADR-17: Gênero-pai aprendido com os rótulos do usuário (#93)](#adr-17-gênero-pai-aprendido-com-os-rótulos-do-usuário-93)
+- [ADR-18: Marcações por artista (#107)](#adr-18-marcações-por-artista-107)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -752,6 +753,51 @@ Uma ferramenta de curiosidade: ver como a biblioteca "se organiza" sozinha.
 - **Desligar o negativo implícito entre Pop e Electronic (#101):** o Electronic passa a pegar 1.123 faixas, um terço da biblioteca.
 
 ---
+
+## ADR-18: Marcações por artista (#107)
+
+**Contexto.** O áudio não separa pop ocidental de J-pop, nem K-pop de pop. Na revisão da master J-pop & VTubers
+(13/11/2026, 483 faixas), 59 eram de pop ocidental e 17 de K-pop; Michael Jackson e Katy Perry caíram lá pelo som. Na
+da J-rock & Anime (12/11), 20 faixas de artistas VTuber estavam fora da J-pop & VTubers. O artista separa esses
+casos, quase sempre.
+
+**Decisão.** Etiquetas dadas pelo usuário (`motor/marcacoes.py`, migração 022):
+- **Por artista, com exceção por faixa.** A etiqueta (`k-pop`, `vtuber`, `pop-ocidental`…) vale para todas as faixas
+  do artista, em todos os canais com o mesmo nome. A exceção da faixa vence o artista: acrescenta ou tira. Artista
+  misto (HoYo-MiX faz trilha e também K-pop) não recebe etiqueta; só a faixa.
+- **Parceria fica com todas.** A faixa recebe a etiqueta de cada artista dela, não só a do principal (APT., de ROSÉ
+  e Bruno Mars, fica com `k-pop` e `pop-ocidental`).
+- **São dados, não regra.** O projeto é compartilhado e cada pessoa quer de um jeito. A IA usa as etiquetas conforme
+  o pedido: `filtros.exigir_marcacoes`, `filtros.excluir_marcacoes` e `marcacoes_preferidas` (fator do score, com
+  peso em `pesos.marcacoes`). Os campos novos só entram no hash da receita quando usados, então as receitas
+  anteriores mantêm o hash. A execução que usa marcações leva o hash delas na versão do banco.
+- **Regras de destino, opcionais e pessoais**, no `config.toml`:
+
+  ```toml
+  [[marcacoes.regras]]
+  etiqueta = "k-pop"
+  entrar_em = ["K-pop", "Pop & Rap"]   # masters, por título ou id
+  sair_de = ["J-pop & VTubers"]
+  ```
+
+  Só valem nas playlists master; as outras seguem a lógica do usuário. **Entrar vence sair:** a música de uma
+  VTuber que também está na K-pop fica nas duas. Sem regra, as marcações só informam.
+- **Fora do classificador de áudio.** Não viram feature, não entram nos limiares nem na calibração. As regras valem
+  depois do áudio, em dois lugares:
+  - no `classificar --nas-gerais`: acrescentam destinos (`Destino.regra`, com o score do áudio só para informação)
+    e barram outros (`Decisao.barradas`); `--sem-regras` mostra só o áudio;
+  - no `curator marcacoes plano`: corrige as masters atuais, só com o que contraria as regras (curtidas com a
+    etiqueta entram; faixas com ela saem). Dislikes e a lista negra não entram.
+- **Pessoais:** ficam fora do pacote compartilhado (#96), como os rótulos de gênero.
+- **Só com a palavra do usuário.** Como nos rótulos de gênero (ADR-17), a IA grava uma marcação só quando o usuário
+  diz o que o artista ou a faixa é; nunca pelo que ela acha, nem a partir de uma playlist.
+
+**Alternativas rejeitadas.**
+- **Regra fixa no código** (etiqueta → master): cada pessoa organiza as masters de um jeito.
+- **Etiqueta como feature do classificador:** mudaria limiares e calibração de todas as playlists por um dado que
+  não é de áudio, e esconderia o motivo da decisão. Como regra explícita depois do áudio, o plano mostra o motivo
+  ("marcação k-pop").
+- **Só o artista principal:** perde as parcerias, que o usuário quer nas duas masters.
 
 ## Fluxos dos pedidos de exemplo
 
