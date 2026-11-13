@@ -152,10 +152,9 @@ class AnalisadorExtras:
         """Decodifica o arquivo (como o núcleo: até `DURACAO_MAXIMA_S`) e roda os extras."""
         from curator.audio.analisador import DURACAO_MAXIMA_S, DURACAO_MINIMA_S, AudioInvalido, decodificar
 
-        nativo, taxa = decodificar(caminho)
-        if len(nativo) / taxa < DURACAO_MINIMA_S:
-            raise AudioInvalido(f"áudio com {len(nativo) / taxa:.1f} s (mínimo {DURACAO_MINIMA_S} s)")
-        nativo = nativo[: int(DURACAO_MAXIMA_S * taxa)]
+        nativo, taxa, duracao = decodificar(caminho, DURACAO_MAXIMA_S)
+        if duracao < DURACAO_MINIMA_S:
+            raise AudioInvalido(f"áudio com {duracao:.1f} s (mínimo {DURACAO_MINIMA_S} s)")
         audio16 = (
             nativo
             if taxa == 16000
