@@ -85,3 +85,27 @@ def test_faixa_analisada_com_dislike_mantem_analise(con, yt):
     assert avaliacao(con, "c") == "dislike"
     assert con.execute("SELECT count(*) FROM vetores WHERE video_id = 'c'").fetchone()[0] > 0
     assert con.execute("SELECT status FROM analises WHERE video_id = 'c'").fetchone()[0] == "ok"
+
+
+def test_dislike_que_fica_nas_curtidas_nao_vira_like(con, yt):
+    """O YT real deixa nas curtidas a faixa que levou dislike, e a lista diz LIKE para ela: só o botão do
+    player diz a verdade."""
+    sincronizar(con, yt)
+    yt.playlists["PL1"]["tracks"] = []
+    yt.avaliacoes = {"a": "DISLIKE"}
+    con.execute("UPDATE faixas SET avaliacao = 'dislike' WHERE video_id = 'a'")
+    sincronizar(con, yt)
+    assert avaliacao(con, "a") == "dislike"
+    assert yt.chamadas["next"] == 1  # só a faixa com dislike é conferida
+    yt.avaliacoes = {"a": "LIKE"}  # tirou o dislike e curtiu de novo
+    sincronizar(con, yt)
+    assert avaliacao(con, "a") == "like"
+
+
+def test_dislike_sem_resposta_do_player_continua_dislike(con, yt):
+    sincronizar(con, yt)
+    yt.playlists["PL1"]["tracks"] = []
+    con.execute("UPDATE faixas SET avaliacao = 'dislike' WHERE video_id = 'b'")
+    yt.falhar_next = True
+    sincronizar(con, yt)
+    assert avaliacao(con, "b") == "dislike"

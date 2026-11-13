@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from curator.banco.conexao import agora, transacao
-from curator.banco.consultas import BIBLIOTECA
+from curator.banco.consultas import BIBLIOTECA, DISLIKES
 from curator.coleta.cliente import ClienteYT
 from curator.texto import id_artista
 
@@ -158,10 +158,13 @@ def sincronizar_curtidas(con: sqlite3.Connection, cli: ClienteYT) -> Resumo:
     r = Resumo()
     resposta = cli.chamar("get_liked_songs", limit=None)
     antes = {row[0] for row in con.execute("SELECT video_id FROM faixas WHERE curtida = 1")}
+    # O YT deixa nas curtidas a faixa que levou dislike, e a lista diz LIKE para ela: o dislike gravado só
+    # muda quando o botão do player (`avaliacao_atual`) disser outra coisa.
+    dislikes = {row[0] for row in con.execute(DISLIKES)}
     agora_ids: list[str] = []
     with transacao(con):
         for t in resposta.get("tracks") or []:
-            vid = gravar_faixa(con, t)
+            vid = gravar_faixa(con, {**t, "likeStatus": None} if t.get("videoId") in dislikes else t)
             if vid is None:
                 r.conta("sem_video_id")
                 continue
@@ -178,9 +181,15 @@ def sincronizar_curtidas(con: sqlite3.Connection, cli: ClienteYT) -> Resumo:
             (agora(),),
         )
         con.execute(
-            "UPDATE faixas SET avaliacao = 'like', avaliacao_em = ? WHERE curtida = 1 AND avaliacao != 'like'",
+            "UPDATE faixas SET avaliacao = 'like', avaliacao_em = ? WHERE curtida = 1 "
+            "AND avaliacao NOT IN ('like', 'dislike')",
             (agora(),),
         )
+    if presos := [v for v in agora_ids if v in dislikes]:
+        conf = conferir_avaliacoes(con, cli, presos)
+        r.conta("dislikes_nas_curtidas", len(set(presos) & {row[0] for row in con.execute(DISLIKES)}))
+        if falhas := conf.contagens.get("falhas", 0) + conf.contagens.get("sem_resposta", 0):
+            r.avisos.append(f"{falhas} dislike(s) nas curtidas sem conferência no player; continuam dislike")
     novos = set(agora_ids)
     r.conta("total", len(novos))
     r.conta("novas", len(novos - antes))
