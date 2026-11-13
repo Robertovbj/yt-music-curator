@@ -7,6 +7,11 @@ eles recebem quando retirados), então playlists "fechadas" exigem mais semelhan
 Decisão de cima para baixo: a faixa só é comparada com as filhas das mães em que passou. Multi-rótulo:
 entra em toda playlist em que s ≥ τ.
 
+Nas playlists master (#105) vale a regra com que elas foram criadas (`clusters.segunda_master`): entre as masters
+em que a faixa passou, fica a de maior score e, na fronteira, a segunda. No máximo duas. Sem isso, as masters
+pequenas (limiar frouxo) aceitavam quase tudo: tirando cada faixa da sua master e classificando de novo, a precisão
+era 0,51; com a regra, 0,92 (docs/avaliacao.md).
+
 Só nas playlists que o usuário nomeia (#80): `em` (playlists), `mae` (as filhas dela) ou `nas_gerais` (as
 criadas por `curator playlists sugerir`). Sem alvo, nada é sugerido: as playlists existentes não são mexidas sem
 pedido.
@@ -180,6 +185,23 @@ def decidir(
     return Decisao(video_id, sorted(destinos, key=lambda d: (-d.score, d.playlist_id)), proximas, ambigua)
 
 
+def no_maximo_duas(destinos: list[Destino], masters: set[str], fronteira: float) -> list[Destino]:
+    """A regra das masters (#105): entre os destinos que são masters, só o de maior score e, se estiver a até
+    `fronteira` dele, o segundo. Os outros destinos ficam como estão."""
+    ms = sorted((d for d in destinos if d.playlist_id in masters), key=lambda d: (-d.score, d.playlist_id))
+    ficam = {d.playlist_id for d in ms[:1] + [d for d in ms[1:2] if d.score >= ms[0].score - fronteira]}
+    return [d for d in destinos if d.playlist_id not in masters or d.playlist_id in ficam]
+
+
+def fronteira_das_masters(con: sqlite3.Connection) -> float | None:
+    """A `fronteira` com que as gerais foram criadas, se elas são masters (`quantas`); None se não são."""
+    from curator.motor import clusters
+
+    aid = clusters.ultimo(con, clusters.CURTIDAS)
+    p = clusters._parametros_salvos(con, aid) if aid is not None else None
+    return p.fronteira if p and p.quantas else None
+
+
 def alvos(con: sqlite3.Connection, mae: str | None = None, em: list[str] | None = None,
           nas_gerais: bool = False) -> list[str]:  # fmt: skip
     """As playlists que a classificação pode sugerir, na ordem do pedido e sem repetir. Levanta `SemAlvo`."""
@@ -216,6 +238,12 @@ def classificar(con: sqlite3.Connection, ids: list[str] | None = None, mae: str 
     com = [v for v in ids if v in emb.indice]
     ps, frias = perfis(con, k, alfa, percentil)
     decisoes = [decidir(emb.linha(v), v, ps, raizes, k, alfa) for v in com]
+    if nas_gerais and (fronteira := fronteira_das_masters(con)) is not None:
+        from curator.motor import gerais
+
+        masters = set(gerais.playlists(con))
+        for d in decisoes:
+            d.destinos = no_maximo_duas(d.destinos, masters, fronteira)
     if regras:
         decisoes = aplicar_regras(con, decisoes, regras, raizes, ps, emb, k, alfa)
     titulos = {r[0] for r in con.execute(
