@@ -55,8 +55,10 @@ PADRAO: dict = {
     },
     "analise": {
         # análises extras (#88, audio/extras.py): cada uma com versão própria, sem reabrir a fila do núcleo.
-        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado. [] desliga (#92)
-        "extras": ["msd_tags", "yamnet", "maest"],
+        # Faixas novas recebem na mesma passada; as já analisadas, a partir do áudio guardado. [] desliga (#92).
+        # Só o MAEST vem ligado: é o que o gênero aprendido usa. "msd_tags" e "yamnet" continuam disponíveis
+        # (extras = ["msd_tags", "yamnet", "maest"]), mas não melhoraram nenhum sinal medido (docs/avaliacao.md).
+        "extras": ["maest"],
     },
     "provedores": {
         # "bandcamp" fica fora: a busca exige desafio JS (ver provedores/bandcamp.py); dá para pôr de volta no config

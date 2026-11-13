@@ -237,6 +237,22 @@ Revocação / falsos positivos no corte 0,8:
 
 **Custo** (faixa de ~3 min 30 s, CPU de 8 núcleos): núcleo ~7 s; tags do MSD ~2,4 s; YAMNet ~0,9 s; MAEST ~12 s. A RAM do worker vai de 1,5 GB para 2,8 GB. Metadados: ~1,5 s por faixa no Deezer e ~4,4 s no MusicBrainz (1 pedido/s). Na amostra, 88% casaram no Deezer e 90% no MusicBrainz, antes do casamento mais tolerante a títulos "original - tradução".
 
+### Os extras guardados valem o custo? (13/11)
+
+O `msd_tags` e o `yamnet` ficaram guardados desde a #88 para esta conferência. Custam 2,65 s por faixa (o MAEST, 10 s; o núcleo, 6,5 s) e 28 MB dos 88 MB de vetores. Medido numa cópia do banco, cada um como sinal a mais:
+
+| Uso | Só o que já é usado | Melhor resultado com os extras |
+|---|---|---|
+| Acertar a master da faixa (leave-one-out, 2.550 faixas) | 0,949 (EffNet) | 0,951 (+ YAMNet); + tags do MSD: 0,925 |
+| Gênero aprendido, AUC sem o artista (Hip Hop / Pop / Rock / Electronic) | 0,976 / 0,965 / 0,972 / 0,921 (EffNet + MAEST) | diferenças de até 0,005 |
+| Prever as marcações, AUC sem o artista (k-pop / pop-ocidental / vtuber) | 0,905 / 0,971 / 0,974 (EffNet + MAEST) | 0,906 / 0,971 / 0,979 |
+| Cantada × trilha (masters como gabarito aproximado), AUC | 0,972 (`instrumental`) | 0,988 (tag "instrumental" do MSD) |
+| Rap × "não é rap" rotulado (53 × 21), AUC | 0,99 (régua aprendida, #101) | 0,907 ("Rapping" do YAMNet, sozinho) |
+
+Nada passa do ruído, fora a tag "instrumental" do MSD, com ganho pequeno. Por isso `[analise] extras` passou a trazer só o `maest`; os outros dois continuam disponíveis no config e, com os áudios guardados, podem ser calculados depois. O que já foi calculado fica no banco.
+
+Do núcleo, também guardados e sem uso: `bpm_rhythm` e `beat_confidence` (o RhythmExtractor concorda com o TempoCNN em 72% das faixas, difere por uma oitava em 15% e diverge em 13%; a confiança mediana é 1,63 / 0,91 / 0,28 nesses grupos), `tom`, `escala`, `key_strength` e `effnet_emb_std`. Seguem no núcleo, porque tirá-los reabriria a fila inteira.
+
 ## Gênero-pai aprendido com os rótulos (#93)
 
 **Data:** 2026-11-07 · **Decisão:** ADR-17 · **Script:** `contrib/avaliacao/genero_aprendido.py`.

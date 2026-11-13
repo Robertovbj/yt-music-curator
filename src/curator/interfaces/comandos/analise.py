@@ -48,7 +48,8 @@ def analisar(
 ) -> None:
     """Consome a fila (baixa, analisa, grava e apaga ou guarda o áudio) e depois completa as análises extras.
 
-    Os extras ([analise] extras: tags do MSD-MusiCNN, YAMNet, MAEST) vêm na mesma passada para as faixas novas. Nas
+    Os extras ([analise] extras: por padrão só o MAEST; tags do MSD-MusiCNN e YAMNet são opcionais) vêm na mesma
+    passada para as faixas novas. Nas
     já analisadas (um extra novo, ou uma versão nova dele), rodam sobre os áudios guardados (#84/#90), sem rede e sem
     reabrir a fila. Para não calcular extras, `[analise] extras = []` no config (#92)."""
     try:
