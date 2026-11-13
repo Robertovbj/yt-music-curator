@@ -26,6 +26,7 @@
 - [ADR-16: Compartilhar análises entre pessoas (#96)](#adr-16-compartilhar-análises-entre-pessoas-96)
 - [ADR-17: Gênero-pai aprendido com os rótulos do usuário (#93)](#adr-17-gênero-pai-aprendido-com-os-rótulos-do-usuário-93)
 - [ADR-18: Marcações por artista (#107)](#adr-18-marcações-por-artista-107)
+- [ADR-19: Escrita das faixas (#111)](#adr-19-escrita-das-faixas-111)
 - [Fluxos dos pedidos de exemplo](#fluxos-dos-pedidos-de-exemplo)
 - [Roteiro](#roteiro)
 - [Riscos e questões em aberto](#riscos-e-questões-em-aberto)
@@ -798,6 +799,47 @@ casos, quase sempre.
   não é de áudio, e esconderia o motivo da decisão. Como regra explícita depois do áudio, o plano mostra o motivo
   ("marcação k-pop").
 - **Só o artista principal:** perde as parcerias, que o usuário quer nas duas masters.
+
+## ADR-19: Escrita das faixas (#111)
+
+**Contexto.** As masters (#105) agrupam pelo som, e o agrupamento está certo; o erro estava no nome e no uso. O
+cluster que virou "J-pop & VTubers" juntava pop ocidental, pop eletrônico, eletrônica de osu e nightcore: soam
+parecidos (brilhante, rápido, voz aguda, produção densa). Na revisão de 13/11/2026, 216 de 265 faixas estavam fora do
+lugar, e 161 delas estavam no núcleo do cluster, não na fronteira. Idioma e mercado não estão no áudio: o nome
+automático usava o estilo "J-pop" do Discogs400, que o modelo dá pelo som. No cluster original, só 40% das faixas
+tinham escrita japonesa, e o da Pop & Rap se chamava "K-pop" com 0,6% de faixas coreanas.
+
+**Decisão.** A escrita do título, do álbum e dos artistas (`motor/escrita.py`), calculada dos metadados já
+sincronizados, sem rede nem áudio:
+- **Escritas:** `japonesa` (kana), `coreana` (hangul), `chinesa`, `cirilica` e `latina` (nenhuma das outras).
+  Ideogramas sem kana ficam em aberto: o japonês também escreve só com kanji ("怪物", "群青").
+- **O artista completa:** a escrita que aparece em ≥ 30% das faixas dele que o banco conhece. Ideograma sem kana
+  vira japonês se o artista é japonês, senão chinês; a faixa sem escrita própria não latina herda a do artista
+  ("MONSTER", da Reol, é japonesa). Uma faixa com kana não torna japonês o artista ocidental com dez faixas.
+- **É sinal, não rótulo.** Artista japonês que só usa títulos em inglês fica latino; para isso valem as marcações
+  (ADR-18). Mudar as regras pede um `escrita.VERSAO` novo.
+- **Receitas:** `filtros.exigir_escritas`, `filtros.excluir_escritas` e `escritas_preferidas` (fator, com peso em
+  `pesos.escritas`). Como na ADR-18, os campos só entram no hash quando usados, e a execução que os usa leva a
+  versão do algoritmo e o hash das escritas na versão do banco.
+- **Recomendações:** `exigir_escritas` e `excluir_escritas` no pedido, nos dois modos (são metadados); na CLI,
+  `--escrita` e `--sem-escrita`. O `spec` dos pedidos sem esses campos não muda.
+- **MCP:** `buscar_faixas` mostra a escrita, `descrever_vocabulario("escritas")` dá a distribuição, e as instruções
+  mandam usar a escrita em pedidos de J-pop, J-rock, anime ou K-pop (J-rock = escrita japonesa + Rock).
+- **Nome dos clusters:** `descrever` traz a fração por escrita; o nome automático só usa um estilo de mercado
+  ("J-pop", "Kayōkyoku", "K-pop") se a escrita correspondente estiver em ≥ 50% das faixas. Estatísticas antigas, sem
+  escrita, ficam como estavam. Nas masters de 12/11: o cluster da J-pop vira "Dance-pop / House", o da Pop & Rap
+  também, e o da J-rock & Anime (77% japonesa) continua "J-pop".
+
+**Medição.** O classificador de áudio não muda: na biblioteca toda (3.228 faixas) e no segmento japonês (595), a
+afinidade dos 15 gêneros e a saída do `classificar --nas-gerais` ficam idênticas às do master. Nas faixas da revisão de
+13/11, a escrita japonesa aparece em 12% das que estavam erradas na J-pop e em 75% das certas.
+
+**Alternativas rejeitadas.**
+- **Idioma do vocal pelo áudio** (ex.: identificação de idioma do Whisper): mais caro, pede reanalisar a biblioteca;
+  fica para quando a escrita não bastar.
+- **Detectar nightcore, uploads de fãs ou "osu":** é preferência pessoal (há quem queira nightcore); fica nas faixas
+  ignoradas e nas marcações.
+- **Escrita como feature do agrupamento:** misturaria idioma com som, e o agrupamento pelo som está certo.
 
 ## Fluxos dos pedidos de exemplo
 

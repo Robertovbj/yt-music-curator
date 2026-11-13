@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from curator.banco import consultas
 from curator.motor import recomendacoes as rc
+from curator.motor.escrita import Escrita
 from curator.motor.receita import Alvo
 from curator.texto import normalizar
 
@@ -70,6 +71,9 @@ class Pedido(BaseModel):
     # só no modo lento: as novas precisam de análise para isto
     perfil_alvo: dict[str, Alvo] = {}
     generos_preferidos: dict[str, Annotated[float, Field(gt=0, le=10)]] = {}
+    # #111: escrita do título/álbum/artistas (motor/escrita.py), pelos metadados: vale nos dois modos
+    exigir_escritas: list[Escrita] = []  # pelo menos uma delas
+    excluir_escritas: list[Escrita] = []
 
     @model_validator(mode="after")
     def _coerente(self):
@@ -95,7 +99,11 @@ class Pedido(BaseModel):
         })  # fmt: skip
 
     def spec(self) -> dict:
-        return self.model_dump(mode="json")
+        d = self.model_dump(mode="json")
+        for campo in ("exigir_escritas", "excluir_escritas"):  # #111: pedidos anteriores mantêm o hash
+            if not d[campo]:
+                del d[campo]
+        return d
 
 
 # ------------------------------------------------------------------ agregação das coletas
@@ -225,6 +233,11 @@ def candidatas(
     penalidade = fatores_dislike(con, sorted(agregados), cfg)
     f_pop = _fatores_popularidade(con, sorted(agregados), p.popularidade)
     publicadas = _publicadas(con, sorted(agregados)) if p.publicadas_desde else {}
+    escritas = {}
+    if p.exigir_escritas or p.excluir_escritas:
+        from curator.motor import escrita
+
+        escritas = escrita.calcular(con, sorted(agregados))
     rk = Ranking([])
     for vid, a in agregados.items():
         m = meta.get(vid)
@@ -250,6 +263,12 @@ def candidatas(
             continue
         if p.duracao_s and not (m["duracao_s"] and p.duracao_s[0] <= m["duracao_s"] <= p.duracao_s[1]):
             rk.descartes["duração"] += 1
+            continue
+        if p.exigir_escritas and not escritas.get(vid, frozenset()) & set(p.exigir_escritas):
+            rk.descartes["sem a escrita exigida"] += 1
+            continue
+        if p.excluir_escritas and escritas.get(vid, frozenset()) & set(p.excluir_escritas):
+            rk.descartes["escrita excluída"] += 1
             continue
         if p.publicadas_desde and not (
             publicadas.get(vid) and publicadas[vid] >= p.publicadas_desde.isoformat()
@@ -369,7 +388,8 @@ def conhecidas_do_motor(
     r = Receita(
         nome="recomendacao", tamanho=min(1000, n + len(ja) + len(sementes)), universo="biblioteca", sementes=sem,
         perfil_alvo=p.perfil_alvo, generos_preferidos=p.generos_preferidos,
-        filtros={"excluir_artistas": p.excluir_artistas, "duracao_s": p.duracao_s},
+        filtros={"excluir_artistas": p.excluir_artistas, "duracao_s": p.duracao_s,
+                 "exigir_escritas": p.exigir_escritas, "excluir_escritas": p.excluir_escritas},
     )  # fmt: skip
     out = []
     for i in executar(con, r).itens:

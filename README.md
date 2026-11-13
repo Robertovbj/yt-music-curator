@@ -186,6 +186,11 @@ uv run curator marcacoes plano                          # corrige as masters atu
 - **Parcerias:** a faixa fica com as etiquetas de todos os artistas dela.
 - **Regras de destino (opcionais):** no `config.toml`, `[[marcacoes.regras]]` com `etiqueta`, `entrar_em` e `sair_de` (masters, por título). Entrar vence sair. Elas valem no `classificar --nas-gerais`, depois do som (`--sem-regras` mostra só o som), e no `marcacoes plano`. Sem regra, as marcações só informam.
 
+**Escrita das faixas (#111).** O som não diz o idioma: o que soa como J-pop junta pop ocidental, eletrônica de jogo e nightcore. A escrita do título, do álbum e dos artistas (`japonesa`, `coreana`, `chinesa`, `cirilica`, `latina`) diz, e vem dos metadados, sem baixar nada. Faixa só com kanji segue o artista (o japonês também escreve só com kanji); faixa com título em inglês herda a escrita do artista.
+- **Nas receitas:** `filtros.exigir_escritas` (ex.: `["japonesa"]` para J-pop e J-rock), `filtros.excluir_escritas` e `escritas_preferidas` como fator do score.
+- **Nas recomendações:** `curator recomendar rapido --escrita japonesa` (ou `--sem-escrita`); pelo MCP, `exigir_escritas`/`excluir_escritas`.
+- **Nome dos clusters:** só cita "J-pop" ou "K-pop" quando a maioria das faixas tem aquela escrita.
+
 Popularidade e tipo do vídeo (#87) vêm do `sincronizar`:
 - **`popularidade`:** o percentil das visualizações de todo o YouTube na sua biblioteca, em escala log, de 0 (lado B) a 1 (as mais vistas). Vale em `perfil_alvo` e em `filtros.min`/`max`, como uma feature.
 - **`filtros.tipos_video`:** `["faixa"]` deixa só as faixas de áudio, sem clipes (`clipe`) nem vídeos de usuário (`usuario`). A faixa sem essa informação fica.
