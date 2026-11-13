@@ -123,3 +123,43 @@ def test_nas_gerais_usa_as_curtidas_fora_das_gerais(con):
     assert {"rock10", "rock12"} <= ids and not ids & {f"rock{i:02d}" for i in range(10)}
     assert {x.playlist_id for d in c.decisoes for x in d.destinos} <= {"PLgeral"}
     assert "PLgeral" in destinos(c, "rock11")
+
+
+# ------------------------------------------------------------------ regra das masters (#105)
+
+
+def test_no_maximo_duas_entre_as_masters():
+    def d(pid, s):
+        return cl.Destino(pid, pid, s, 0.5)
+
+    ds = [d("A", 0.90), d("B", 0.89), d("C", 0.885), d("X", 0.6)]
+    assert [x.playlist_id for x in cl.no_maximo_duas(ds, {"A", "B", "C"}, 0.02)] == ["A", "B", "X"]
+    assert [x.playlist_id for x in cl.no_maximo_duas(ds, {"A", "B", "C"}, 0.0)] == ["A", "X"]  # só a melhor
+    assert [x.playlist_id for x in cl.no_maximo_duas(ds, {"C"}, 0.02)] == ["A", "B", "C", "X"]  # uma só: fica
+    assert cl.no_maximo_duas([], {"A"}, 0.02) == []
+
+
+def test_nas_masters_a_faixa_fica_em_no_maximo_duas(con):
+    from curator.motor import gerais
+
+    # três gerais de rock: pelo limiar, uma curtida de rock entra nas três
+    for nome, faixa in (("G1", range(0, 10)), ("G2", range(0, 7)), ("G3", range(3, 10))):
+        playlist(con, f"PL{nome}", nome, [f"rock{i:02d}" for i in faixa])
+        con.execute("UPDATE playlists SET geral = 1 WHERE playlist_id = ?", (f"PL{nome}",))
+    assert cl.fronteira_das_masters(con) is None  # gerais que não são masters: multi-rótulo, como antes
+    antes = next(d for d in cl.classificar(con, nas_gerais=True).decisoes if d.video_id == "rock10")
+    assert len(antes.destinos) == 3
+    gerais.obter(con, gerais.parametros(quantas=3, fronteira=0.02))  # agora as gerais são masters
+    assert cl.fronteira_das_masters(con) == 0.02
+    depois = next(d for d in cl.classificar(con, nas_gerais=True).decisoes if d.video_id == "rock10")
+    assert 1 <= len(depois.destinos) <= 2
+    assert depois.destinos[0].score == max(x.score for x in antes.destinos)
+    # fora das gerais, nada muda: playlists nomeadas continuam multi-rótulo
+    assert (
+        len(
+            next(
+                d for d in cl.classificar(con, ids=["rock10"], em=["PLG1", "PLG2", "PLG3"]).decisoes
+            ).destinos
+        )
+        == 3
+    )
