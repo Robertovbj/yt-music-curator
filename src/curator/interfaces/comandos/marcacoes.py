@@ -1,9 +1,8 @@
 """`curator marcacoes`: etiquetas por artista ("k-pop", "vtuber"…) e exceções por faixa (#107)."""
 
-import json
-
 import typer
 
+from curator.banco import consultas
 from curator.banco.conexao import transacao
 from curator.config import carregar_config
 from curator.interfaces.cli import app
@@ -20,10 +19,8 @@ app.add_typer(marcacoes_app, name="marcacoes")
 
 
 def _titulo(con, vid: str) -> str:
-    r = con.execute("SELECT titulo, artistas FROM faixas WHERE video_id = ?", (vid,)).fetchone()
-    if r is None:
-        return vid
-    return f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])} ({vid})"
+    nome = consultas.nomes_das_faixas(con, [vid]).get(vid)
+    return f"{nome} ({vid})" if nome else vid
 
 
 @marcacoes_app.command("artista")

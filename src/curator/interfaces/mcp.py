@@ -105,8 +105,8 @@ def _faixas(con, ids: list[str]) -> dict[str, dict]:
         return {}
     out = {}
     for r in con.execute(
-        f"SELECT video_id, titulo, artistas, album_nome FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})",
-        ids,
+        f"SELECT video_id, titulo, artistas, album_nome FROM faixas WHERE video_id IN {consultas.EM_LISTA}",
+        (consultas.lista(ids),),
     ):
         out[r["video_id"]] = {
             "video_id": r["video_id"],
@@ -202,8 +202,8 @@ def _dados_de_uso(con, ids: list[str]) -> dict[str, dict]:
     tipo = popularidade.tipos(con, ids)
     out = {v: {} for v in ids}
     for r in con.execute(
-        f"SELECT video_id, visualizacoes, publicada_em FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})",
-        ids,
+        f"SELECT video_id, visualizacoes, publicada_em FROM faixas WHERE video_id IN {consultas.EM_LISTA}",
+        (consultas.lista(ids),),
     ):
         out[r["video_id"]] = {k: v for k, v in {
             "tipo_video": tipo[r["video_id"]], "visualizacoes": r["visualizacoes"], "publicada_em": r["publicada_em"],

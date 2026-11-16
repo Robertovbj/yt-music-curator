@@ -107,6 +107,21 @@ def sugerir(
     return out
 
 
+def criar_por_cluster(cs: list[Cluster]) -> list[Operacao]:
+    """Uma playlist nova por cluster, da maior para a menor, com todos os membros (a sobreposição vale: uma faixa
+    pode ir para mais de uma)."""
+    nomes = nomes_unicos(cs)
+    ops: list[Operacao] = []
+    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
+        alvo = f"nova:{nomes[c.cluster_id]}"
+        membros = sorted(c.membros)
+        ops += [
+            Operacao("criar", alvo, titulo=nomes[c.cluster_id]),
+            Operacao("adicionar", alvo, membros, motivo={v: f"cluster [{c.cluster_id}], sim {c.membros[v]:.2f}" for v in membros}),
+        ]  # fmt: skip
+    return ops
+
+
 def filhas_atuais(con: sqlite3.Connection, mae: str) -> list[str]:
     """As descendentes da mãe (sem ela), válidas para o motor."""
     return [
@@ -127,15 +142,7 @@ def recategorizar(con: sqlite3.Connection, mae: str, cs: list[Cluster]) -> list[
     Ninguém sai da mãe: as faixas já estão nela (o escopo dos clusters é a mãe com as descendentes)."""
     if not cs:
         raise ValueError("nenhum cluster: nada para recategorizar")
-    nomes = nomes_unicos(cs)
-    ops: list[Operacao] = []
-    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
-        alvo = f"nova:{nomes[c.cluster_id]}"
-        membros = sorted(c.membros)
-        ops += [
-            Operacao("criar", alvo, titulo=nomes[c.cluster_id]),
-            Operacao("adicionar", alvo, membros, motivo={v: f"cluster [{c.cluster_id}], sim {c.membros[v]:.2f}" for v in membros}),
-        ]  # fmt: skip
+    ops = criar_por_cluster(cs)
     for pid in filhas_atuais(con, mae):
         ids = [
             r[0]

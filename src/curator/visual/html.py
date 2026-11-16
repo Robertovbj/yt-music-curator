@@ -29,7 +29,7 @@ def dados(con: sqlite3.Connection) -> dict:
     meta = {
         r["video_id"]: r
         for r in con.execute(
-            f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})", ids
+            f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN {consultas.EM_LISTA}", (consultas.lista(ids),)
         )
     } if ids else {}  # fmt: skip
     esc = espacos.escalares(con)

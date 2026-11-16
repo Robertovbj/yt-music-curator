@@ -1,6 +1,26 @@
 """Consultas de biblioteca usadas pelo resto do sistema (ADR-03)."""
 
+import json
 import sqlite3
+
+# `... WHERE video_id IN {EM_LISTA}`, com `lista(ids)` como parâmetro: um parâmetro só para uma lista de qualquer
+# tamanho, sem montar "?, ?, ?" nem partir em lotes pelo limite de variáveis do SQLite.
+EM_LISTA = "(SELECT value FROM json_each(?))"
+
+
+def lista(valores) -> str:
+    return json.dumps(list(valores))
+
+
+def nomes_das_faixas(con: sqlite3.Connection, ids) -> dict[str, str]:
+    """video_id → "Título — Artista, Artista" (até dois artistas), para mostrar listas de faixas."""
+    return {
+        r["video_id"]: f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])}"
+        for r in con.execute(
+            f"SELECT video_id, titulo, artistas FROM faixas WHERE video_id IN {EM_LISTA}", (lista(ids),)
+        )
+    }
+
 
 # Playlists que o motor enxerga: próprias, nem de descobertas (criadas a partir de recomendações, ADR-13: o
 # que só está nelas ainda não foi curtido) nem ignoradas (#77). Use com o alias `p`.

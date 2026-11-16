@@ -45,7 +45,7 @@ def _efeito(con, pid: str) -> str:
     fora = [v for v in ids if v not in em_outras]
     curtidos = sum(
         r[0]
-        for r in con.execute(f"SELECT curtida FROM faixas WHERE video_id IN ({','.join('?' * len(fora))})", fora)
+        for r in con.execute(f"SELECT curtida FROM faixas WHERE video_id IN {consultas.EM_LISTA}", (consultas.lista(fora),))
     ) if fora else 0  # fmt: skip
     return (
         f"{len(ids)} vídeo(s): {len(fora)} fora de tudo ({curtidos} curtido(s)), "

@@ -19,7 +19,8 @@ from dataclasses import replace
 
 from curator.motor import clusters
 from curator.motor.clusters import CURTIDAS, Cluster, Parametros
-from curator.motor.planos import Operacao, criar
+from curator.motor.planos import criar
+from curator.motor.reorganizar import criar_por_cluster
 
 PARAMETROS = Parametros(min_cluster_size=40, selecao="leaf")
 ORIGEM = "gerais"
@@ -51,16 +52,7 @@ def obter(
 def plano(con: sqlite3.Connection, agrupamento_id: int, cs: list[Cluster]) -> int:
     """Plano que cria uma playlist nova por cluster, com todos os membros (a sobreposição vale: uma faixa pode ir
     para mais de uma). Não toca nenhuma playlist existente."""
-    nomes = clusters.nomes_unicos(cs)
-    ops = []
-    for c in sorted(cs, key=lambda c: (-len(c.membros), c.cluster_id)):
-        alvo = f"nova:{nomes[c.cluster_id]}"
-        membros = sorted(c.membros)
-        ops += [
-            Operacao("criar", alvo, titulo=nomes[c.cluster_id]),
-            Operacao("adicionar", alvo, membros, motivo={v: f"cluster [{c.cluster_id}], sim {c.membros[v]:.2f}" for v in membros}),
-        ]  # fmt: skip
-    return criar(con, f"{ORIGEM}:{agrupamento_id}", ops, propagar_agregadoras=False)
+    return criar(con, f"{ORIGEM}:{agrupamento_id}", criar_por_cluster(cs), propagar_agregadoras=False)
 
 
 def playlists(con: sqlite3.Connection) -> list[str]:

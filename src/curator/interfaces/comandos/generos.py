@@ -1,11 +1,11 @@
 """`curator generos`: os seus rótulos de gênero-pai e o gênero aprendido com eles (#93, ADR-17)."""
 
-import json
 import tomllib
 from pathlib import Path
 
 import typer
 
+from curator.banco import consultas
 from curator.interfaces.cli import app
 from curator.interfaces.comum import banco, falhar
 from curator.motor import aprendido
@@ -28,10 +28,7 @@ def _pai(con, pai: str) -> str:
 
 
 def _titulo(con, vid: str) -> str:
-    r = con.execute("SELECT titulo, artistas FROM faixas WHERE video_id = ?", (vid,)).fetchone()
-    if r is None:
-        return vid
-    return f"{r['titulo']} — {', '.join(a['nome'] for a in json.loads(r['artistas'])[:2])}"
+    return consultas.nomes_das_faixas(con, [vid]).get(vid, vid)
 
 
 @generos_app.command("importar-gabarito")

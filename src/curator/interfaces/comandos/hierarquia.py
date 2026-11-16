@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from curator.banco import hierarquia
+from curator.banco import consultas, hierarquia
 from curator.config import caminhos
 from curator.interfaces.cli import app
 from curator.interfaces.comum import banco, falhar
@@ -72,7 +72,8 @@ def verificar() -> None:
         titulo = con.execute("SELECT titulo FROM playlists WHERE playlist_id = ?", (mae,)).fetchone()[0]
         typer.echo(f"{titulo}: faltam {len(ids)} faixa(s)")
         for linha in con.execute(
-            f"SELECT titulo, artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})", ids
+            f"SELECT titulo, artistas FROM faixas WHERE video_id IN {consultas.EM_LISTA}",
+            (consultas.lista(ids),),
         ):
             nomes = ", ".join(a["nome"] for a in json.loads(linha["artistas"]))
             typer.echo(f"  - {linha['titulo']} — {nomes}")

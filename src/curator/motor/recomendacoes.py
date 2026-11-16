@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from curator.banco import consultas
 from curator.banco.conexao import agora, transacao
 
 FONTES = ("yt_radio", "yt_related", "deezer")
@@ -44,7 +45,8 @@ def ler_coletas(con: sqlite3.Connection, ids: list[int]) -> list[dict]:
     if not ids:
         return []
     linhas = con.execute(
-        f"SELECT * FROM coletas WHERE coleta_id IN ({','.join('?' * len(ids))}) ORDER BY coleta_id", ids
+        f"SELECT * FROM coletas WHERE coleta_id IN {consultas.EM_LISTA} ORDER BY coleta_id",
+        (consultas.lista(ids),),
     )
     return [{**dict(r), "itens": json.loads(r["itens"])} for r in linhas]
 
@@ -189,10 +191,9 @@ def precisa_conferir(con: sqlite3.Connection, ids: list[str], validade_dias: flo
     limiar = (datetime.now(UTC) - timedelta(days=validade_dias)).strftime("%Y-%m-%dT%H:%M:%SZ")
     conferidas = {
         r[0]
-        for i in range(0, len(ids), 900)
         for r in con.execute(
-            f"SELECT video_id FROM faixas WHERE avaliacao_conferida_em >= ? AND video_id IN ({','.join('?' * len(ids[i : i + 900]))})",
-            (limiar, *ids[i : i + 900]),
+            f"SELECT video_id FROM faixas WHERE avaliacao_conferida_em >= ? AND video_id IN {consultas.EM_LISTA}",
+            (limiar, consultas.lista(ids)),
         )
     }
     return [v for v in ids if v not in conferidas]

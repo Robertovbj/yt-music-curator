@@ -32,7 +32,7 @@ from itertools import combinations
 
 import numpy as np
 
-from curator.banco import vetores
+from curator.banco import consultas, vetores
 from curator.banco.conexao import agora, transacao
 from curator.motor import escrita, espacos
 
@@ -235,7 +235,7 @@ def descrever(con: sqlite3.Connection, ids: list[str]) -> dict:
             est[chave] = [[pm.colunas[i], round(float(media[i]), 3)] for i in top]
     artistas = Counter()
     for (lista,) in con.execute(
-        f"SELECT artistas FROM faixas WHERE video_id IN ({','.join('?' * len(ids))})", ids
+        f"SELECT artistas FROM faixas WHERE video_id IN {consultas.EM_LISTA}", (consultas.lista(ids),)
     ):
         artistas.update(a["nome"] for a in json.loads(lista)[:1])
     est["artistas"] = [[a, n] for a, n in sorted(artistas.items(), key=lambda x: (-x[1], x[0]))[:5]]
@@ -273,8 +273,6 @@ def nome_automatico(est: dict) -> str:
 
 def _universo(con: sqlite3.Connection, escopo: str) -> list[str]:
     """Faixas do escopo, sem as que têm dislike (#61) ou estão na lista negra (#77, #100)."""
-    from curator.banco import consultas
-
     if escopo == "biblioteca":
         return consultas.utilizaveis(con)
     dislikes = consultas.bloqueadas(con)
