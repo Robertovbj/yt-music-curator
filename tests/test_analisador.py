@@ -26,11 +26,23 @@ def _tom_estereo(destino, segundos=8, taxa=48000, amplitude=0.5):
 @precisa_ffmpeg
 def test_decodificar_media_dos_canais_sem_ganho(tmp_path):
     """O "-ac 1" do ffmpeg somava com ganho √2 (pico 0,71 aqui); a mixagem precisa ser a média (pico 0,5)."""
-    audio, taxa = decodificar(_tom_estereo(tmp_path / "t.webm"))
-    assert taxa == 48000
+    audio, taxa, duracao = decodificar(_tom_estereo(tmp_path / "t.webm"))
+    assert taxa == 48000 and duracao == len(audio) / taxa
     assert len(audio) == pytest.approx(8 * 48000, rel=0.01)
     assert audio.dtype == np.float32
     assert np.abs(audio[4800:-4800]).max() == pytest.approx(0.5, abs=0.03)  # longe das bordas do codec
+
+
+@precisa_ffmpeg
+def test_decodificar_com_limite_le_so_o_comeco_e_guarda_a_duracao_total(tmp_path):
+    arquivo = _tom_estereo(tmp_path / "t.webm", segundos=14)
+    inteiro, taxa, total = decodificar(arquivo)
+    comeco, _, duracao = decodificar(arquivo, limite_s=8)
+    assert len(comeco) == 8 * taxa and duracao == pytest.approx(total, abs=0.1)
+    assert np.array_equal(comeco, inteiro[: len(comeco)])  # as mesmas amostras de quando decodificava tudo
+    # limite maior que o arquivo: nada muda
+    folgado, _, d = decodificar(arquivo, limite_s=60)
+    assert np.array_equal(folgado, inteiro) and d == total
 
 
 @precisa_ffmpeg

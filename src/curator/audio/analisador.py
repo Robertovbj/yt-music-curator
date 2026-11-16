@@ -181,12 +181,9 @@ class Analisador:
             tempos[nome] = round(agora - marco, 3)
             marco = agora
 
-        nativo, taxa = decodificar(caminho)
-        duracao = len(nativo) / taxa
+        nativo, taxa, duracao = decodificar(caminho, DURACAO_MAXIMA_S)
         if duracao < DURACAO_MINIMA_S:
             raise AudioInvalido(f"áudio com {duracao:.1f} s (mínimo {DURACAO_MINIMA_S} s)")
-        if duracao > DURACAO_MAXIMA_S:
-            nativo = nativo[: int(DURACAO_MAXIMA_S * taxa)]
         audio44 = self.reamostrar(nativo, taxa, 44100, 1)
         audio16 = self.reamostrar(nativo, taxa, 16000, 4)
         audio11 = self.reamostrar(nativo, taxa, 11025, 4)
@@ -251,28 +248,41 @@ class Analisador:
         )
 
 
-def decodificar(caminho: Path) -> tuple[np.ndarray, int]:
-    """(mono float32, taxa nativa), decodificado pelo ffmpeg do sistema direto para a memória.
+def decodificar(caminho: Path, limite_s: float | None = None) -> tuple[np.ndarray, int, float]:
+    """(mono float32, taxa nativa, duração total em s), decodificado pelo ffmpeg do sistema direto para a memória.
 
     O MonoLoader do essentia-tensorflow 2.1b6 não abre opus/webm ("Unsupported codec"), e converter
     para WAV gastaria ~30 MB de disco por faixa. A reamostragem fica com o Essentia (ver `reamostrar`).
+
+    `limite_s`: só o começo do arquivo é decodificado, e a duração total vem do contêiner. Sem isso, um medley
+    de 1 h em estéreo a 48 kHz punha ~1,4 GB de PCM na memória para a análise usar os primeiros 15 min. As
+    amostras devolvidas são as mesmas de antes (o corte exato é feito aqui; o ffmpeg só para 1 s depois).
+    Contêiner sem duração: decodifica tudo, como antes.
     """
     for prog in ("ffmpeg", "ffprobe"):
         if not shutil.which(prog):
             raise RuntimeError(f"{prog} não encontrado no PATH (necessário para decodificar o áudio)")
     sonda = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate,channels",
-         "-of", "csv=p=0", str(caminho)],
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+         "stream=sample_rate,channels:format=duration", "-of", "json", str(caminho)],
         capture_output=True, text=True, check=False,
     )  # fmt: skip
     try:
-        taxa, canais = (int(x) for x in sonda.stdout.strip().split(",")[:2])
-    except ValueError:
+        dados = json.loads(sonda.stdout)
+        taxa, canais = int(dados["streams"][0]["sample_rate"]), int(dados["streams"][0]["channels"])
+    except ValueError, KeyError, IndexError:
         raise AudioInvalido(f"sem trilha de áudio legível: {sonda.stderr.strip()[:300]}") from None
+    try:
+        no_conteiner = float(dados["format"]["duration"])
+    except ValueError, KeyError, TypeError:
+        no_conteiner = None
+    if no_conteiner is None:
+        limite_s = None
+    corte = ["-t", str(limite_s + 1)] if limite_s is not None else []
     # Canais nativos + média no numpy: o "-ac 1" do ffmpeg soma com ganho √2 (+3 dB, picos acima de 1,0),
     # enquanto o MonoLoader do Essentia (e os modelos) usam a média simples dos canais.
     r = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(caminho), "-map", "0:a:0", "-f", "f32le", "-"],
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(caminho), "-map", "0:a:0", *corte, "-f", "f32le", "-"],
         capture_output=True, check=False,
     )  # fmt: skip
     if r.returncode != 0:
@@ -281,7 +291,10 @@ def decodificar(caminho: Path) -> tuple[np.ndarray, int]:
         )
     amostras = np.frombuffer(r.stdout, dtype="<f4")
     amostras = amostras[: len(amostras) - len(amostras) % canais].reshape(-1, canais)
-    return amostras.mean(axis=1, dtype=np.float32), taxa
+    duracao = len(amostras) / taxa
+    if limite_s is not None and duracao > limite_s:
+        amostras, duracao = amostras[: int(limite_s * taxa)], max(no_conteiner, duracao)
+    return amostras.mean(axis=1, dtype=np.float32), taxa, duracao
 
 
 def escala_pt(escala: str) -> str:
