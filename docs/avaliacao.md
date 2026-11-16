@@ -24,6 +24,24 @@ Os pedidos "onde colocar as não alocadas" e "sugira playlists" usam ferramentas
 
 **Observação:** nas duas conversas, o pedido "sem Hoyoverse" achou sozinho, via `buscar_artistas`, um segundo artista além do HOYO-MiX ("HoYoFair") e excluiu os dois.
 
+## Escala das sementes (motor v4, 13/11)
+
+A componente das sementes era `(cos + 1) / 2`, que supõe cossenos de −1 a 1. No EffNet da biblioteca, o cosseno entre duas faixas quaisquer vai de 0,18 a 1 (mediana 0,47), e a componente só andava de 0,63 a 0,93, enquanto o perfil-alvo vai de 0 a 1. Ficar longe das sementes custava no máximo 0,3; ficar longe do perfil custava 1. Os `pesos` não valiam o que diziam.
+
+Agora 0 é o cosseno do percentil 1 da biblioteca com o centroide das sementes e 1 é o próprio centroide (`executor.PERCENTIL_PISO`). A régua sai da biblioteca, como o z-score do perfil: candidatas de fora não mexem nela.
+
+Medido numa cópia do banco, com três sementes de rap (Without Me, Rap God, Lose Yourself), top-50, λ = 0,75:
+
+| Receita | Jaccard com a lista "só sementes" (v3 → v4) | Cosseno médio com as sementes (v3 → v4) | Lista v3 × v4 |
+|---|---|---|---|
+| Só sementes | — | 0,826 → 0,827 | 0,82 |
+| Só perfil-alvo | — | — | 1,00 |
+| Sementes + perfil que combina (energia e dança altas) | 0,08 → 0,23 | 0,680 → 0,785 | 0,30 |
+| Sementes + perfil contrário (calmo e acústico) | 0,00 → 0,01 | 0,516 → 0,613 | 0,37 |
+| Idem, com `pesos.sementes = 3` | 0,01 → 0,32 | 0,608 → 0,775 | 0,16 |
+
+Com peso 3 nas sementes, a lista da v3 ainda não tinha quase nada do que as sementes sozinhas trariam. Receitas sem sementes não mudam. Na receita só de sementes, 18% da lista muda porque o score ficou mais espalhado e o MMR (que não mudou) pesa um pouco menos: a semelhança interna da lista vai de 0,761 para 0,770 (sem MMR, 0,786).
+
 ## Classificação nas filhas do Rock - All (#28)
 
 **Data:** 2026-11-04 · **Faixas analisadas:** 3407 de 3417 (fila completa) · **Escopo:** as 5 filhas do Rock - All, 160 faixas analisadas, 23 delas em duas filhas.
