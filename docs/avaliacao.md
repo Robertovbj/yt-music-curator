@@ -357,3 +357,17 @@ Com 7, sai um grupo de ~105 faixas de J-pop mais enérgico; com 8, também um de
 
 **As 6 (núcleo + fronteira).** Trilhas calmas e orquestrais (HOYO-MiX, Lorien Testard, Yu-Peng Chen; energia 0,11, 100 BPM) 708 + 45 · pop e rap ocidentais (Melanie Martinez, Alec Benjamin, Sasha Alex Sloan) 608 + 77 · J-pop e VTubers (Hoshimachi Suisei, YOASOBI, Reol, Ado) 407 + 62 · trilhas com mais movimento (HOYO-MiX, Masayoshi Soken, MONACA; 133 BPM) 369 + 70 · J-rock e anime (kessoku band, ClariS, TrySail) 273 + 54 · rock e metal (BABYMETAL, Sabaton, Linkin Park) 278 + 39. Os nomes automáticos erram (o pop ocidental sai como "K-pop", pelos estilos do Discogs), então os nomes são do usuário.
 
+### Curtida nova nas masters (13/11)
+
+O `classificar --nas-gerais` punha a faixa em toda master em que o score passava do limiar (ADR-06). As masters pequenas têm limiar frouxo (K-pop, 38 faixas; Eletrônica & Phonk, 37) e aceitavam quase tudo: 356 faixas da Pop & Rap também iam para a K-pop. Medido tirando cada faixa da sua master e classificando de novo (2.553 faixas em 8 masters, 13% delas em duas):
+
+| Regra | Precisão | Revocação |
+|---|---|---|
+| Toda master com s ≥ τ (a regra antiga) | 0,51 | 0,90 |
+| A de maior score, fronteira 0 | 0,95 | 0,78 |
+| **A de maior score + a segunda a até 0,02** | **0,92** | **0,85** |
+| Idem, a até 0,05 | 0,82 | 0,87 |
+
+Ficou a terceira, que é a regra com que as masters foram criadas (`clusters.segunda_master`), com a `fronteira` salva no agrupamento. Vale só nas gerais que são masters (`quantas`); nas playlists nomeadas (`--em`, `--mae`) e nas gerais do HDBSCAN, o multi-rótulo do ADR-06 continua. As regras das marcações (#107) seguem valendo depois.
+
+As masters nasceram de clusters do mesmo embedding, então estes números são um teto, não o acerto em curtidas novas. Script: `contrib/avaliacao/masters_classificacao.py`.

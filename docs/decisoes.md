@@ -290,6 +290,7 @@ Os valores iniciais são k = 10 e α = 0,6, ambos fixos e versionados.
 
 - **Limiar por playlist (τₚ):** calculado por validação *leave-one-out* sobre os membros atuais de *p*. É o percentil 10 dos scores que os próprios membros recebem quando são retirados da playlist. Cada playlist tem seu critério: uma playlist "fechada" (som homogêneo) exige mais semelhança que uma "aberta".
 - **Multi-rótulo:** a faixa vai para **todas** as folhas em que `s ≥ τₚ`. É assim que um crossover entra em duas playlists.
+  - **Exceção, nas playlists master (#105):** entre as masters em que passou, a faixa fica na de maior score e, se estiver a até `fronteira` dela, na segunda. É a regra com que as masters foram criadas; com o multi-rótulo, a precisão nelas era 0,51 (docs/avaliacao.md, "Curtida nova nas masters").
 - **Hierárquico (top-down):** primeiro decide entre as mães, depois só entre as filhas das mães aceitas. Isso evita que uma faixa de rap seja comparada com subgêneros de metal.
 - **Sem destino:** se a faixa não passa em nenhum limiar, aparece como "sem destino", com as três playlists mais próximas e as distâncias. Muitas faixas sem destino parecidas entre si indicam uma playlist nova (ADR-07).
 - **Partida a frio:** uma folha com menos de 5 membros não tem estatística suficiente. Nesse caso usa uma receita descritiva, criada pela IA a partir do título, com aviso de baixa confiança.
