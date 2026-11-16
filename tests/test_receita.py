@@ -113,6 +113,20 @@ def test_excluir_album_e_playlist(con):
     assert not any(v in ids for v in [f"rock{i:02d}" for i in range(6)])
 
 
+def test_rotulos_repetidos_nos_extras_nao_quebram_a_receita(con):
+    # o MAEST (#88) usa os mesmos nomes de estilo do Discogs400; a receita só lê os vetores dela
+    con.executemany(
+        "INSERT INTO rotulos_modelo (tipo, indice, rotulo) VALUES (?, ?, ?)",
+        [("maest519", 0, "Hip Hop---Trap"), ("msd_tags", 0, "Hip Hop---Trap")],
+    )
+    spec = {
+        "generos_preferidos": {"Hip Hop---Trap": 1.0},
+        "filtros": {"generos_min": {"Hip Hop---Trap": 0.3}},
+    }
+    antes = executar(con, Receita(nome="trap", tamanho=5, **spec)).ids
+    assert antes and all(v.startswith("rap") for v in antes)
+
+
 def test_sementes_puxam_o_estilo_das_sementes(con):
     r = Receita(
         nome="parecidas", tamanho=6, sementes=["rap01", "rap02"], diversidade={"max_por_artista": None}

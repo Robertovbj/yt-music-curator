@@ -102,10 +102,16 @@ def _metadados(con: sqlite3.Connection, ids: list[str]) -> dict[str, dict]:
 
 
 def _indice_rotulos(con: sqlite3.Connection) -> dict[str, list[tuple[str, int]]]:
-    """rótulo → [(tipo do vetor, índice)]; o mesmo nome pode existir em mais de um modelo."""
+    """rótulo → [(tipo do vetor, índice)]; o mesmo nome pode existir em mais de um modelo.
+
+    Só os vetores da receita (`TIPOS_PROBABILIDADE`): os extras (#88) repetem os nomes (o MAEST tem os 400 estilos
+    do Discogs, as tags do MSD têm "rock") e não entram aqui."""
+    tipos = espacos.TIPOS_PROBABILIDADE
     out = defaultdict(list)
     for tipo, indice, rotulo in con.execute(
-        "SELECT tipo, indice, rotulo FROM rotulos_modelo ORDER BY tipo, indice"
+        f"SELECT tipo, indice, rotulo FROM rotulos_modelo WHERE tipo IN ({','.join('?' * len(tipos))}) "
+        "ORDER BY tipo, indice",
+        tipos,
     ):
         out[rotulo].append((tipo, indice))
     return out
